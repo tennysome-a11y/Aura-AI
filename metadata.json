@@ -1,6 +1,6 @@
 {
   "name": "REM-AI Consolidation Core",
   "description": "Subconscious mutation dashboard and System 2 optimization engine for REM-AI, validating transaction logs, updating synaptic vaults, and compiling adaptive brain models.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

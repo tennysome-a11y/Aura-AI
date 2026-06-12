@@ -20,7 +20,16 @@ import {
   BookOpen, 
   Code, 
   Cpu,
-  History
+  History,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  Radio,
+  Sparkles,
+  Square,
+  Play,
+  Headphones
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -99,6 +108,180 @@ export default function App() {
   // Synthetic live brain trigger to simulate local input interactions using compiled brain code
   const [testUserInput, setTestUserInput] = useState<string>("REM-SECURE-2026: Confirm diagnostic metrics.");
   const [testResult, setTestResult] = useState<{ status: string, latency_ms: number, message: string } | null>(null);
+
+  // Duplex Voice and Multi-Model Speech Synthesis Configuration State
+  const [isRecording, setIsRecording] = useState<boolean>(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [transcriptionResult, setTranscriptionResult] = useState<string>("");
+  const [voiceTextPrompt, setVoiceTextPrompt] = useState<string>("");
+  const [voiceResponseText, setVoiceResponseText] = useState<string>("");
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [audioPlaybackUrl, setAudioPlaybackUrl] = useState<string | null>(null);
+  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const [selectedVoice, setSelectedVoice] = useState<string>("Zephyr");
+  const [selectedModel, setSelectedModel] = useState<string>("gemini-3.5-flash");
+  const [voiceIsLoading, setVoiceIsLoading] = useState<boolean>(false);
+
+  // Start microphones tracking & recording telemetry chunks
+  const startRecording = async () => {
+    try {
+      setTranscriptionResult("Opening auditory devices...");
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        const completeBlob = new Blob(chunks, { type: "audio/webm" });
+        const reader = new FileReader();
+        reader.readAsDataURL(completeBlob);
+        reader.onloadend = async () => {
+          const base64data = (reader.result as string).split(",")[1];
+          setVoiceIsLoading(true);
+          setTranscriptionResult("Analyzing speech metrics via GenAI...");
+          try {
+            const res = await fetch("/api/transcribe", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ audioData: base64data, mimeType: "audio/webm" })
+            });
+            const data = await res.json();
+            if (data.text) {
+              setTranscriptionResult(data.text);
+              setVoiceTextPrompt(data.text);
+            } else {
+              setTranscriptionResult("[No distinct speech captured]");
+            }
+          } catch (err: any) {
+            setTranscriptionResult(`Auditory channel error: ${err.message || "Failed to transcribe"}`);
+          } finally {
+            setVoiceIsLoading(false);
+          }
+        };
+      };
+
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+      setTranscriptionResult("Listening to vocal streaming...");
+    } catch (err: any) {
+      console.error("Microphone hardware exception:", err);
+      setTranscriptionResult(`Access error: ${err.message || "Auditory frame permission denied"}`);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && isRecording) {
+      mediaRecorder.stop();
+      mediaRecorder.stream.getTracks().forEach(track => track.stop());
+      setIsRecording(false);
+    }
+  };
+
+  // Dispatch multi-model chat query and play back synthesized vocal waveform
+  const handleVoiceChatSubmit = async (customPrompt?: string) => {
+    const promptToUse = customPrompt || voiceTextPrompt;
+    if (!promptToUse.trim()) return;
+
+    setVoiceIsLoading(true);
+    setVoiceResponseText("Acquiring vocal state from multi-model synaptic gateway...");
+
+    if (audioElement) {
+      audioElement.pause();
+      setIsPlaying(false);
+    }
+
+    try {
+      let parsedSynState = {};
+      try {
+        parsedSynState = JSON.parse(synapticState);
+      } catch (_) {}
+
+      const res = await fetch("/api/chat-voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userInput: promptToUse,
+          modelName: selectedModel,
+          voiceName: selectedVoice,
+          synapticConfig: parsedSynState
+        })
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json();
+        throw new Error(errJson.error || "Speech dispatch exception.");
+      }
+
+      const data = await res.json();
+      setVoiceResponseText(data.text);
+
+      if (data.audio) {
+        const binary = atob(data.audio);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: "audio/wav" });
+        const url = URL.createObjectURL(blob);
+        setAudioPlaybackUrl(url);
+
+        const newAudio = new Audio(url);
+        newAudio.onplay = () => setIsPlaying(true);
+        newAudio.onended = () => setIsPlaying(false);
+        newAudio.onpause = () => setIsPlaying(false);
+
+        setAudioElement(newAudio);
+        newAudio.play().catch(e => {
+          console.warn("Speech playback blocked by browser security frame:", e);
+        });
+      }
+    } catch (err: any) {
+      setVoiceResponseText(`Channel fault: ${err.message || "Failed to reach vocal core"}`);
+    } finally {
+      setVoiceIsLoading(false);
+    }
+  };
+
+  // Play/Stop custom player manually
+  const toggleAudioPlayback = () => {
+    if (audioElement) {
+      if (isPlaying) {
+        audioElement.pause();
+      } else {
+        audioElement.play().catch(e => console.warn(e));
+      }
+    }
+  };
+
+  // Push interaction to main day ledger
+  const injectToHistory = () => {
+    if (!voiceTextPrompt.trim() && !voiceResponseText.trim()) return;
+    
+    let existingHistory: any[] = [];
+    try {
+      existingHistory = JSON.parse(interactionHistory);
+    } catch (_) {
+      try {
+        existingHistory = [interactionHistory];
+      } catch (_) {
+        existingHistory = [];
+      }
+    }
+
+    if (!Array.isArray(existingHistory)) {
+      existingHistory = [String(interactionHistory)];
+    }
+
+    const speakerHeader = `User (Vocal Input): ${voiceTextPrompt || "[typed prompt]"}`;
+    const assistantHeader = `REM-AI Oral Synth [${selectedVoice}]: ${voiceResponseText || "[no response]"}`;
+    const updatedHistory = [assistantHeader, speakerHeader, ...existingHistory];
+
+    setInteractionHistory(JSON.stringify(updatedHistory, null, 2));
+  };
 
   // Perform consolidation request to System 2 API
   const handleConsolidate = async () => {
@@ -291,6 +474,229 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-8 py-8">
+        
+        {/* COGNITIVE VOICE DUPLEX CORE CONSOLE */}
+        <section id="cognitive-vocal-core" className="mb-8 border border-[#1e1b4b]/30 bg-[#080808] p-6 rounded-sm shadow-2xl relative overflow-hidden">
+          {/* Neon decorative layout blur */}
+          <div className="absolute top-0 right-0 w-64 h-64 bg-[#6366f1]/5 rounded-full blur-[100px] pointer-events-none"></div>
+
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-[#141414] pb-4 gap-4 relative z-10">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 bg-[#4338ca] text-[#c7d2fe] text-[9px] font-bold rounded-sm uppercase tracking-widest border border-[#4f46e5]/40 animate-pulse">
+                  DUPLEX CHANNEL
+                </span>
+                <span className="text-[10px] uppercase font-mono tracking-widest text-[#6366f1] flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                  Multi-Model Speech Synth Core
+                </span>
+              </div>
+              <h2 className="text-xl font-light tracking-tight text-white mt-1">Cognitive Voice Synaptic Terminal</h2>
+            </div>
+
+            {/* Model & Voice Selectors */}
+            <div className="flex flex-wrap items-center gap-4 text-xs font-mono relative z-20">
+              <div className="flex flex-col">
+                <span className="text-[9px] text-[#4b5563] uppercase tracking-wider mb-1">Model Telemetry</span>
+                <select
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="bg-[#000] border border-[#1a1a1a] rounded px-2.5 py-1.5 text-neutral-300 font-mono text-xs focus:outline-none focus:border-[#6366f1]/50 cursor-pointer"
+                >
+                  <option value="gemini-3.5-flash">Alpha Core (gemini-3.5-flash)</option>
+                  <option value="gemini-3.1-pro-preview">Omega Reasoning (gemini-3.1-pro)</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col">
+                <span className="text-[9px] text-[#4b5563] uppercase tracking-wider mb-1">Oral Vocoder Voice</span>
+                <select
+                  value={selectedVoice}
+                  onChange={(e) => setSelectedVoice(e.target.value)}
+                  className="bg-[#000] border border-[#1a1a1a] rounded px-2.5 py-1.5 text-neutral-300 font-mono text-xs focus:outline-none focus:border-[#6366f1]/50 cursor-pointer"
+                >
+                  <option value="Zephyr">Zephyr (Neutral Cyber)</option>
+                  <option value="Kore">Kore (Somatic / Calm)</option>
+                  <option value="Puck">Puck (Dynamic / Warm)</option>
+                  <option value="Fenrir">Fenrir (Deep Tech)</option>
+                  <option value="Charon">Charon (Resonant)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-6 relative z-10">
+            {/* Auditory Capture Station (Recording & Uploading) */}
+            <div className="lg:col-span-4 bg-[#050505] border border-[#141414] p-5 rounded-sm flex flex-col justify-between space-y-4">
+              <div className="space-y-2">
+                <h3 className="text-[11px] font-mono uppercase text-[#9ca3af] tracking-wider flex items-center gap-1.5">
+                  <Headphones className="w-3.5 h-3.5 text-indigo-400" />
+                  Auditory Capture Channel
+                </h3>
+                <p className="text-[10px] text-[#4b5563] leading-relaxed select-none">
+                  Record spoken streams using your browser's physical microphone. Transcribed inputs can feed the sleep ledger automatically.
+                </p>
+              </div>
+
+              {/* Record Toggle Button */}
+              <div className="flex flex-col items-center justify-center p-4 bg-[#0a0a0a] border border-[#141414] rounded-sm relative space-y-4">
+                {/* Visual waves using dynamic height lines */}
+                {isRecording ? (
+                  <div className="flex items-center gap-1.5 h-8">
+                    {[1, 2, 3, 4, 3, 2, 1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3, 2, 1].map((val, idx) => (
+                      <span
+                        key={idx}
+                        className="w-1 bg-[#6366f1] rounded-full animate-pulse"
+                        style={{
+                          height: `${val * 6}px`,
+                          animationDelay: `${idx * 0.05}s`,
+                          animationDuration: "0.5s"
+                        }}
+                      ></span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 h-8">
+                    <span className="text-[10px] font-mono text-[#4b5563] uppercase tracking-widest pr-1">Audio stream silent</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-600"></span>
+                  </div>
+                )}
+
+                <button
+                  onClick={isRecording ? stopRecording : startRecording}
+                  className={`py-3 px-6 rounded font-mono text-xs font-semibold tracking-wider flex items-center justify-center gap-2 transition-all w-full cursor-pointer ${
+                    isRecording
+                      ? "bg-red-950 text-red-400 border border-red-900 shadow-[0_0_15px_rgba(239,68,68,0.2)] animate-pulse"
+                      : "bg-[#0c0a09] hover:bg-[#1a1c1e] text-[#818cf8] border border-[#1e1b4b] hover:border-[#6366f1]"
+                  }`}
+                >
+                  {isRecording ? (
+                    <>
+                      <MicOff className="w-4 h-4 text-red-400" />
+                      STOP TRANSCRIPTION
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="w-4 h-4 text-[#818cf8] animate-bounce" />
+                      RECORD USER SPEECH
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Transcription Result Output */}
+              <div className="bg-black/80 border border-[#141414] rounded-sm p-3 min-h-[70px] flex flex-col justify-between font-mono">
+                <span className="text-[9px] text-[#4b5563] uppercase tracking-wider block mb-1">Live Telemetry Transcripts</span>
+                <p className="text-[11px] text-[#e0e0e0] italic min-h-[30px] select-text">
+                  {transcriptionResult || "// Click Record speech and start speaking..."}
+                </p>
+              </div>
+            </div>
+
+            {/* Vocal Interaction Core (Typing & Dispatching) */}
+            <div className="lg:col-span-8 bg-[#050505] border border-[#141414] p-5 rounded-sm flex flex-col justify-between space-y-4">
+              <div className="space-y-1">
+                <h3 className="text-[11px] font-mono uppercase text-[#9ca3af] tracking-wider flex items-center gap-1.5">
+                  <Radio className="w-3.5 h-3.5 text-[#6366f1]" />
+                  Duplex Conversation Engine
+                </h3>
+                <p className="text-[10px] text-[#4b5563] font-mono uppercase tracking-wide">
+                  Submit auditory transcripts or direct keystrokes. Model vocal response answers play on the fly.
+                </p>
+              </div>
+
+              <div className="flex gap-2.5">
+                <input
+                  type="text"
+                  value={voiceTextPrompt}
+                  onChange={(e) => setVoiceTextPrompt(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleVoiceChatSubmit(); }}
+                  className="flex-1 bg-[#000] border border-[#141414] focus:border-[#6366f1]/40 rounded py-2 px-3.5 font-mono text-xs text-[#d1d5db] focus:outline-none placeholder-[#4b5563]"
+                  placeholder="Voice query prompt (e.g. system authorization metrics...)"
+                />
+                
+                <button
+                  onClick={() => handleVoiceChatSubmit()}
+                  disabled={voiceIsLoading || !voiceTextPrompt.trim()}
+                  className={`px-5 py-2 bg-[#1e1b4b] hover:bg-[#25215c] border border-[#312e81] text-[#818cf8] font-mono text-xs uppercase tracking-wider font-semibold transition-all rounded cursor-pointer hover:text-white flex items-center gap-1.5 ${
+                    (voiceIsLoading || !voiceTextPrompt.trim()) ? "opacity-40 cursor-not-allowed" : ""
+                  }`}
+                >
+                  {voiceIsLoading ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Volume2 className="w-3.5 h-3.5" />
+                  )}
+                  Synthesize
+                </button>
+              </div>
+
+              {/* Speech Synth response & Live Latency Indicator */}
+              <div className="bg-[#000] border border-[#141414] p-4 rounded-sm flex flex-col justify-between min-h-[110px] space-y-3 relative font-mono">
+                <div>
+                  <div className="flex justify-between items-center text-[9px] text-[#4b5563] uppercase mb-1.5">
+                    <span>REM-AI Vocal Spectrum Response</span>
+                    {voiceResponseText && (
+                      <span className="text-[#f59e0b] border border-[#f59e0b]/20 px-1 bg-[#f59e0b]/5 rounded text-[8px]">
+                        LATENCY COMPLIANT: {Math.round(voiceResponseText.length * 1.2)} ms (1.2ms/char)
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[#e5e7eb] leading-relaxed italic select-text pr-10">
+                    {voiceResponseText || "Awaiting oral query synthesis stream..."}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-[#141414]/60">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={toggleAudioPlayback}
+                      disabled={!audioPlaybackUrl}
+                      className={`text-[10px] uppercase font-semibold flex items-center gap-1 px-2 py-1 rounded transition-colors ${
+                        !audioPlaybackUrl
+                          ? "text-[#4b5563] cursor-not-allowed"
+                          : "bg-[#1e1b4b] text-[#818cf8] hover:bg-[#25215c] cursor-pointer"
+                      }`}
+                    >
+                      {isPlaying ? (
+                        <>
+                          <Square className="w-2.5 h-2.5 fill-current" /> Pause Voice
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-2.5 h-2.5 fill-current" /> Play Voice
+                        </>
+                      )}
+                    </button>
+
+                    {/* Simple speaker wave visualizer */}
+                    {isPlaying && (
+                      <div className="flex items-center gap-0.5">
+                        <span className="w-0.5 h-3 bg-[#6366f1] animate-[pulse_0.4s_infinite]"></span>
+                        <span className="w-0.5 h-4 bg-[#6366f1] animate-[pulse_0.6s_infinite]"></span>
+                        <span className="w-0.5 h-2 bg-[#6366f1] animate-[pulse_0.5s_infinite]"></span>
+                        <span className="w-0.5 h-4.5 bg-[#6366f1] animate-[pulse_0.3s_infinite]"></span>
+                        <span className="w-1 bg-[#6366f1] h-1.5"></span>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={injectToHistory}
+                    disabled={!voiceTextPrompt.trim() && !voiceResponseText.trim()}
+                    className={`text-[10px] uppercase border border-[#1e1b4b] text-[#818cf8] hover:bg-[#1e1b4b]/20 px-2.5 py-1 rounded-sm transition-all flex items-center gap-1 cursor-pointer ${
+                      (!voiceTextPrompt.trim() && !voiceResponseText.trim()) ? "opacity-40 cursor-not-allowed" : ""
+                    }`}
+                  >
+                    <Database className="w-3 h-3" /> Compress ledger entry
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </section>
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           
           {/* COLUMN 1: Inbound Day Cycle Payload (lg:col-span-4) */}

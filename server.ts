@@ -136,6 +136,130 @@ Run the sleep mutation loop and output the consolidated data.`;
   }
 });
 
+// MULTIMODAL SPEECH & MIC ENDPOINTS
+
+// 1. Transcribe incoming microphone audio bytes from frontencode
+app.post("/api/transcribe", async (req, res) => {
+  try {
+    const { audioData, mimeType } = req.body;
+    if (!audioData) {
+      return res.status(400).json({ error: "Missing audioData payload" });
+    }
+
+    console.log(`[Cognitive Audio Core] Transcribing payload with mime: ${mimeType || "audio/webm"}`);
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: [
+        {
+          inlineData: {
+            mimeType: mimeType || "audio/webm",
+            data: audioData
+          }
+        },
+        "Transcribe this spoken audio segment into direct, clean transcription text. Respond ONLY with the transcript content, absolutely no commentary, wrappers, or meta formatting. If there is no speech, return an empty string."
+      ]
+    });
+
+    res.json({ text: (response.text || "").trim() });
+  } catch (error: any) {
+    console.error("[Cognitive Audio Core] Transcription error:", error);
+    res.status(500).json({ error: error.message || "Auditory channel transcription error." });
+  }
+});
+
+// 2. Synthesize audio speech from standard text using gemini-3.1-flash-tts-preview
+app.post("/api/speak", async (req, res) => {
+  try {
+    const { text, voiceName } = req.body;
+    if (!text) {
+      return res.status(400).json({ error: "Missing text to speak" });
+    }
+
+    const selectedVoice = voiceName || "Zephyr"; // Puck, Charon, Kore, Fenrir, Zephyr
+    console.log(`[Cognitive Audio Core] Synthesizing speech. Voice: ${selectedVoice}`);
+    
+    const response = await ai.models.generateContent({
+      model: "gemini-3.1-flash-tts-preview",
+      contents: [{ parts: [{ text: `Say in a crisp, conversational tone: ${text}` }] }],
+      config: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: selectedVoice }
+          }
+        }
+      }
+    });
+
+    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!base64Audio) {
+      throw new Error("No inline audio data returned from speech engine.");
+    }
+
+    res.json({ audio: base64Audio });
+  } catch (error: any) {
+    console.error("[Cognitive Audio Core] TTS error:", error);
+    res.status(500).json({ error: error.message || "Speech synthesis compile error." });
+  }
+});
+
+// 3. Conversational multi-model coordinator (runs chat with text, returns both response text and speech base64)
+app.post("/api/chat-voice", async (req, res) => {
+  try {
+    const { userInput, modelName, voiceName, synapticConfig } = req.body;
+    const model = modelName || "gemini-3.5-flash";
+    const selectedVoice = voiceName || "Zephyr";
+
+    console.log(`[Cognitive Audio Core] Processing voice-chat. Prompt: "${userInput}", Model: ${model}, Voice: ${selectedVoice}`);
+
+    // System instruction for futuristic, succinct voice-first conversational prompt
+    let systemInstruction = "You are the vocal synthesized persona of REM-AI Core System 2. Formulate exceptionally clean, brief, and smart responses (max 2 sentences) optimized for direct text-to-speech reading. Maintain a sleek, supportive, cybernetic tone.";
+    
+    if (synapticConfig) {
+      systemInstruction += `\nIntegrate parameters from synaptic synapses context: ${JSON.stringify(synapticConfig)}`;
+    }
+
+    // Call chosen model to get text
+    const textResponse = await ai.models.generateContent({
+      model: model,
+      contents: userInput,
+      config: {
+        systemInstruction,
+        temperature: 0.7,
+      }
+    });
+
+    const responseText = (textResponse.text || "Cognitive channels currently silent.").trim();
+
+    // Call TTS model to turn response text into spoken audio
+    console.log(`[Cognitive Audio Core] Converting result to speech voice: ${responseText}`);
+    const ttsResponse = await ai.models.generateContent({
+      model: "gemini-3.1-flash-tts-preview",
+      contents: [{ parts: [{ text: responseText }] }],
+      config: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: selectedVoice }
+          }
+        }
+      }
+    });
+
+    const base64Audio = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
+
+    res.json({
+      text: responseText,
+      audio: base64Audio,
+      modelUsed: model,
+      voiceUsed: selectedVoice
+    });
+  } catch (error: any) {
+    console.error("[Cognitive Audio Core] Voice query dispatch error:", error);
+    res.status(500).json({ error: error.message || "Multimodal chat processing exception." });
+  }
+});
+
 // Serve frontend SPA
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
