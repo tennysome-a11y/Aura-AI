@@ -3,129 +3,392 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from "react";
+import { useState, useEffect, useRef, FormEvent } from "react";
 import { 
-  Brain, 
-  Settings, 
-  Terminal, 
-  ShieldCheck, 
-  Zap, 
-  CheckCircle2, 
-  Lock, 
-  Unlock, 
-  Database, 
-  Award, 
-  RefreshCw, 
-  Copy, 
+  GraduationCap, 
+  Clock, 
+  Layers, 
+  Star, 
+  Mic, 
+  MicOff, 
+  Volume2, 
+  VolumeX, 
+  Play, 
+  Pause, 
+  RotateCcw,
+  Sparkles, 
+  ChevronRight, 
   BookOpen, 
-  Code, 
-  Cpu,
-  History,
-  Mic,
-  MicOff,
-  Volume2,
-  VolumeX,
-  Radio,
-  Sparkles,
-  Square,
-  Play,
-  Headphones
+  Check, 
+  ArrowRight,
+  TrendingUp, 
+  Lock, 
+  CreditCard, 
+  User, 
+  ExternalLink,
+  MessageSquare,
+  HelpCircle,
+  AlertCircle
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
-interface SynapticVault {
-  core_identity: string;
-  security_tokens: {
-    admin_pass: string;
-  };
-  learned_skills: Record<string, any>;
-  world_facts: string[];
-}
-
-interface ConsolidationResponse {
-  synaptic_vault_update: SynapticVault;
-  brain_b_source_code: string;
-}
-
-interface EventLogItem {
-  id: string;
-  timestamp: string;
-  status: "SUCCESS" | "FAILURE";
-  identity: string;
-  factsCount: number;
-  skillsTaught: string[];
-  promptExcerpt: string;
+interface Flashcard {
+  question: string;
+  answer: string;
 }
 
 export default function App() {
-  // Input payloads
-  const [synapticState, setSynapticState] = useState<string>(
-    JSON.stringify({
-      core_identity: "REM-AI",
-      security_tokens: {
-        admin_pass: "REM-SECURE-2026"
-      },
-      learned_skills: {},
-      world_facts: []
-    }, null, 2)
-  );
+  const [activeTab, setActiveTab] = useState<"tutor" | "focus" | "flashcards" | "pricing">("tutor");
+  const [selectedSubject, setSelectedSubject] = useState<string>("Computer Science");
+  const [selectedVoice, setSelectedVoice] = useState<string>("Zephyr");
+  const [selectedModel, setSelectedModel] = useState<string>("gemini-2.5-flash");
+  const [speechCaptureMode, setSpeechCaptureMode] = useState<"local" | "cloud">("local");
+  const [vadThreshold, setVadThreshold] = useState<number>(6);
+  const [micVolume, setMicVolume] = useState<number>(0);
+  const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
+  const showDiagnosticsRef = useRef<boolean>(false);
+  const [diagnosticsInfo, setDiagnosticsInfo] = useState<{
+    isSecure: boolean;
+    speechSupported: boolean;
+    micPermission: string;
+    activeDevice: string;
+    volumeValue: number;
+    availableMics: Array<{ label: string; deviceId: string }>;
+  }>({
+    isSecure: false,
+    speechSupported: false,
+    micPermission: "unknown",
+    activeDevice: "None",
+    volumeValue: 0,
+    availableMics: []
+  });
 
-  const [interactionHistory, setInteractionHistory] = useState<string>(
-    JSON.stringify([
-      "User prompt: Teach the system a new computational skill: processing latency must be calculated at exactly 1.2 milliseconds per character. Apply this to all future strings."
-    ], null, 2)
-  );
+  const setShowDiagnosticsState = (val: boolean) => {
+    setShowDiagnostics(val);
+    showDiagnosticsRef.current = val;
+  };
 
-  // Consolidated Output States
-  const [consolidatedData, setConsolidatedData] = useState<ConsolidationResponse | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [copiedText, setCopiedText] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"code" | "synapses">("code");
-
-  // Mutation events journal state
-  const [mutationLogs, setMutationLogs] = useState<EventLogItem[]>([
+  // Multi-modal voice tutor states
+  const [userInput, setUserInput] = useState<string>("");
+  const [chatLogs, setChatLogs] = useState<Array<{ sender: "user" | "aura"; text: string; audioUrl?: string }>>([
     {
-      id: "mut-init-1",
-      timestamp: new Date(Date.now() - 3600000 * 3).toLocaleTimeString("en-US", { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + " (3h ago)",
-      status: "SUCCESS",
-      identity: "REM-AI",
-      factsCount: 3,
-      skillsTaught: ["interaction_counting", "dynamic_latency_formula"],
-      promptExcerpt: "Bootstrap core identity model parameters and compile strict admin checks"
-    },
-    {
-      id: "mut-init-2",
-      timestamp: new Date(Date.now() - 3600000 * 1.5).toLocaleTimeString("en-US", { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + " (1.5h ago)",
-      status: "SUCCESS",
-      identity: "REM-AI",
-      factsCount: 3,
-      skillsTaught: ["dynamic_latency_formula"],
-      promptExcerpt: "Optimize latency checks across terminal subprocesses"
+      sender: "aura",
+      text: "Hello! I am Aura, your academic companion. What concept are we mastering today?"
     }
   ]);
-
-  // Synthetic live brain trigger to simulate local input interactions using compiled brain code
-  const [testUserInput, setTestUserInput] = useState<string>("REM-SECURE-2026: Confirm diagnostic metrics.");
-  const [testResult, setTestResult] = useState<{ status: string, latency_ms: number, message: string } | null>(null);
-
-  // Duplex Voice and Multi-Model Speech Synthesis Configuration State
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [transcriptionResult, setTranscriptionResult] = useState<string>("");
-  const [voiceTextPrompt, setVoiceTextPrompt] = useState<string>("");
-  const [voiceResponseText, setVoiceResponseText] = useState<string>("");
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [audioPlaybackUrl, setAudioPlaybackUrl] = useState<string | null>(null);
-  const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
-  const [selectedVoice, setSelectedVoice] = useState<string>("Zephyr");
-  const [selectedModel, setSelectedModel] = useState<string>("gemini-3.5-flash");
-  const [voiceIsLoading, setVoiceIsLoading] = useState<boolean>(false);
+  const [transcriptionStatus, setTranscriptionStatus] = useState<string>("");
+  const [tutorIsLoading, setTutorIsLoading] = useState<boolean>(false);
+  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
+  const [playingAudioId, setPlayingAudioId] = useState<number | null>(null);
 
-  // Start microphones tracking & recording telemetry chunks
-  const startRecording = async () => {
+  // Hands-free voice autopilot states and refs
+  const [isHandsFree, setIsHandsFree] = useState<boolean>(false);
+  const isHandsFreeRef = useRef<boolean>(false);
+  const silenceTimerRef = useRef<any>(null);
+  const audioContextForVadRef = useRef<AudioContext | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  const setHandsFreeState = (val: boolean) => {
+    setIsHandsFree(val);
+    isHandsFreeRef.current = val;
+  };
+
+  // Focus Timer state
+  const [timerMode, setTimerMode] = useState<"study" | "short" | "long">("study");
+  const [timeLeft, setTimeLeft] = useState<number>(25 * 60);
+  const [timerIsRunning, setTimerIsRunning] = useState<boolean>(false);
+  const [ambientSounds, setAmbientSounds] = useState<boolean>(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const noiseNodeRef = useRef<AudioNode | null>(null);
+
+  // Flashcards state
+  const [cardTopic, setCardTopic] = useState<string>("");
+  const [flashcards, setFlashcards] = useState<Flashcard[]>([
+    { question: "What is the Time Complexity of Binary Search?", answer: "O(log n) because the search space is divided in half at each step." },
+    { question: "Explain the difference between SQL and NoSQL.", answer: "SQL databases are relational and table-based with fixed schemas. NoSQL databases are non-relational, document-based, and scale horizontally." },
+    { question: "What is an Abstract Data Type (ADT)?", answer: "A mathematical model for data types defined by its behavior (operations) from the user's point of view, rather than its implementation." }
+  ]);
+  const [cardsLoading, setCardsLoading] = useState<boolean>(false);
+  const [flippedCardIndex, setFlippedCardIndex] = useState<number | null>(null);
+  const [currentCardIndex, setCurrentCardIndex] = useState<number>(0);
+
+  // Premium / Checkout state
+  const [showCheckoutModal, setShowCheckoutModal] = useState<boolean>(false);
+  const [isPremium, setIsPremium] = useState<boolean>(false);
+  const [checkoutIsProcessing, setCheckoutIsProcessing] = useState<boolean>(false);
+  const [cardNumber, setCardNumber] = useState<string>("");
+  const [cardExpiry, setCardExpiry] = useState<string>("");
+  const [cardCvc, setCardCvc] = useState<string>("");
+  const [cardName, setCardName] = useState<string>("");
+
+  // Handle circular timer calculations
+  const totalSecondsForMode = {
+    study: 25 * 60,
+    short: 5 * 60,
+    long: 15 * 60
+  };
+  const percentageTimeLeft = (timeLeft / totalSecondsForMode[timerMode]) * 100;
+
+  // Manage Pomodoro Timer Interval
+  useEffect(() => {
+    let interval: any = null;
+    if (timerIsRunning && timeLeft > 0) {
+      interval = setInterval(() => {
+        setTimeLeft(prev => prev - 1);
+      }, 1000);
+    } else if (timeLeft === 0) {
+      setTimerIsRunning(false);
+      // Play a gentle notify bell
+      try {
+        const osc = new AudioContext().createOscillator();
+        const gain = new AudioContext().createGain();
+        osc.connect(gain);
+        gain.connect(new AudioContext().destination);
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(523.25, 0); // C5
+        osc.start();
+        osc.stop(0.3);
+      } catch (_) {}
+    }
+    return () => clearInterval(interval);
+  }, [timerIsRunning, timeLeft]);
+
+  // Pomodoro reset
+  const handleResetTimer = () => {
+    setTimerIsRunning(false);
+    setTimeLeft(totalSecondsForMode[timerMode]);
+  };
+
+  const handleModeChange = (mode: "study" | "short" | "long") => {
+    setTimerMode(mode);
+    setTimerIsRunning(false);
+    setTimeLeft(totalSecondsForMode[mode]);
+  };
+
+  // Toggle ambient studying sounds (Brownian Noise synthesis)
+  const toggleAmbientSound = () => {
+    if (ambientSounds) {
+      if (noiseNodeRef.current) {
+        try {
+          (noiseNodeRef.current as any).disconnect();
+        } catch (_) {}
+      }
+      setAmbientSounds(false);
+    } else {
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        const ctx = new AudioCtx();
+        audioContextRef.current = ctx;
+
+        // Generate Brown Noise
+        const bufferSize = 2 * ctx.sampleRate;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        let lastOut = 0.0;
+        for (let i = 0; i < bufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          output[i] = (lastOut + (0.02 * white)) / 1.02;
+          lastOut = output[i];
+          output[i] *= 3.5; // Gain compensation
+        }
+
+        const source = ctx.createBufferSource();
+        source.buffer = noiseBuffer;
+        source.loop = true;
+
+        const filter = ctx.createBiquadFilter();
+        filter.type = "lowpass";
+        filter.frequency.setValueAtTime(250, 0); // Mellow cozy frequencies
+
+        const gainNode = ctx.createGain();
+        gainNode.gain.setValueAtTime(0.18, 0);
+
+        source.connect(filter);
+        filter.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        source.start();
+        noiseNodeRef.current = source;
+        setAmbientSounds(true);
+      } catch (err) {
+        console.error("Audio Synthesis block:", err);
+      }
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (noiseNodeRef.current) {
+        try { (noiseNodeRef.current as any).disconnect(); } catch (_) {}
+      }
+      if (silenceTimerRef.current) {
+        clearInterval(silenceTimerRef.current);
+      }
+      if (audioContextForVadRef.current) {
+        try {
+          audioContextForVadRef.current.close();
+        } catch (_) {}
+      }
+    };
+  }, []);
+
+  // Voice Activity Detection / Silence detection loop
+  const startSilenceDetection = async (stream: MediaStream) => {
+    if (silenceTimerRef.current) {
+      clearInterval(silenceTimerRef.current);
+    }
+    if (audioContextForVadRef.current) {
+      try {
+        audioContextForVadRef.current.close();
+      } catch (_) {}
+    }
+
     try {
-      setTranscriptionResult("Opening auditory devices...");
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const audioContext = new AudioCtx();
+      audioContextForVadRef.current = audioContext;
+
+      // Crucial: Resume the AudioContext if suspended (browser gesture requirement)
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
+
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      let lastSpeechTime = Date.now();
+      let hasSpoken = false;
+
+      const interval = setInterval(() => {
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const averageVolume = sum / bufferLength;
+
+        // Map audio energy level (0-40 avg) to visual indicator percent (0-100)
+        const volPercent = Math.min(100, Math.round((averageVolume / 40) * 100));
+        setMicVolume(volPercent);
+
+        if (showDiagnosticsRef.current) {
+          setDiagnosticsInfo(prev => ({ ...prev, volumeValue: averageVolume }));
+        }
+
+        // Decibel threshold for speech detection (values are 0 to 255)
+        const threshold = vadThreshold;
+
+        if (averageVolume > threshold) {
+          hasSpoken = true;
+          lastSpeechTime = Date.now();
+          setTranscriptionStatus("Listening (Speech detected...)");
+        } else {
+          if (hasSpoken) {
+            const silenceMs = Date.now() - lastSpeechTime;
+            setTranscriptionStatus(`Listening (Silence: ${(silenceMs / 1000).toFixed(1)}s)`);
+            
+            // If silent for 2.0 seconds after speaking, stop recording automatically!
+            if (silenceMs > 2000) {
+              clearInterval(interval);
+              silenceTimerRef.current = null;
+              stopRecording();
+            }
+          } else {
+            // If they haven't spoken at all and it's been silent for 8 seconds, timeout
+            if (Date.now() - lastSpeechTime > 8000) {
+              clearInterval(interval);
+              silenceTimerRef.current = null;
+              stopRecording();
+              setTranscriptionStatus("Recording timeout. No speech detected. Check Chrome mic permissions or input volume.");
+            }
+          }
+        }
+      }, 100);
+
+      silenceTimerRef.current = interval;
+    } catch (e) {
+      console.warn("Failed to start VAD:", e);
+    }
+  };
+
+  // Voice Recording functions
+  const startRecording = async () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (speechCaptureMode === "local" && SpeechRecognition) {
+      try {
+        if (recognitionRef.current) {
+          try { recognitionRef.current.abort(); } catch (_) {}
+        }
+
+        const rec = new SpeechRecognition();
+        recognitionRef.current = rec;
+        rec.continuous = false;
+        rec.interimResults = false;
+        rec.lang = "en-US";
+
+        let hasResult = false;
+
+        rec.onstart = () => {
+          setIsRecording(true);
+          setTranscriptionStatus("Listening (Web Speech API)...");
+        };
+
+        rec.onresult = (event: any) => {
+          const transcript = event.results[0][0]?.transcript;
+          console.log("SpeechRecognition result:", transcript);
+          if (transcript && transcript.trim()) {
+            hasResult = true;
+            setTranscriptionStatus("");
+            handleTutorRequest(transcript);
+          }
+        };
+
+        rec.onerror = (event: any) => {
+          console.warn("SpeechRecognition error:", event.error);
+          if (event.error === "no-speech") {
+            setTranscriptionStatus("No speech detected.");
+          } else {
+            setTranscriptionStatus(`Speech error: ${event.error}`);
+          }
+        };
+
+        rec.onend = () => {
+          setIsRecording(false);
+          recognitionRef.current = null;
+
+          // If no result was captured and hands-free is active, restart listening after a delay
+          if (!hasResult && isHandsFreeRef.current) {
+            console.log("No speech captured in hands-free mode, restarting listen loop...");
+            setTimeout(() => {
+              if (isHandsFreeRef.current) {
+                startRecording();
+              }
+            }, 1500);
+          }
+        };
+
+        rec.start();
+      } catch (err: any) {
+        console.error("Failed to start SpeechRecognition:", err);
+        startMediaRecorderRecording();
+      }
+    } else {
+      startMediaRecorderRecording();
+    }
+  };
+
+  const startMediaRecorderRecording = async () => {
+    try {
+      setTranscriptionStatus("Opening mic (Fallback)...");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
       const chunks: Blob[] = [];
@@ -140,8 +403,8 @@ export default function App() {
         reader.readAsDataURL(completeBlob);
         reader.onloadend = async () => {
           const base64data = (reader.result as string).split(",")[1];
-          setVoiceIsLoading(true);
-          setTranscriptionResult("Analyzing speech metrics via GenAI...");
+          setTutorIsLoading(true);
+          setTranscriptionStatus("Transcribing spoken query...");
           try {
             const res = await fetch("/api/transcribe", {
               method: "POST",
@@ -150,15 +413,26 @@ export default function App() {
             });
             const data = await res.json();
             if (data.text) {
-              setTranscriptionResult(data.text);
-              setVoiceTextPrompt(data.text);
+              setTranscriptionStatus("");
+              handleTutorRequest(data.text);
             } else {
-              setTranscriptionResult("[No distinct speech captured]");
+              setTranscriptionStatus("No speech detected.");
+              setTutorIsLoading(false);
+              // In hands-free mode, if it failed to capture speech, wait 1.5s and try listening again
+              if (isHandsFreeRef.current) {
+                setTimeout(() => {
+                  startRecording();
+                }, 1500);
+              }
             }
           } catch (err: any) {
-            setTranscriptionResult(`Auditory channel error: ${err.message || "Failed to transcribe"}`);
-          } finally {
-            setVoiceIsLoading(false);
+            setTranscriptionStatus(`Transcription error: ${err.message || "Failed"}`);
+            setTutorIsLoading(false);
+            if (isHandsFreeRef.current) {
+              setTimeout(() => {
+                startRecording();
+              }, 2000);
+            }
           }
         };
       };
@@ -166,58 +440,149 @@ export default function App() {
       recorder.start();
       setMediaRecorder(recorder);
       setIsRecording(true);
-      setTranscriptionResult("Listening to vocal streaming...");
+      setTranscriptionStatus("Listening...");
+
+      // Trigger VAD silence detector if hands-free is enabled
+      if (isHandsFreeRef.current) {
+        startSilenceDetection(stream);
+      }
     } catch (err: any) {
-      console.error("Microphone hardware exception:", err);
-      setTranscriptionResult(`Access error: ${err.message || "Auditory frame permission denied"}`);
+      console.error(err);
+      setTranscriptionStatus("Microphone access denied.");
+      setHandsFreeState(false);
     }
   };
 
   const stopRecording = () => {
+    setMicVolume(0);
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (_) {}
+      recognitionRef.current = null;
+      setIsRecording(false);
+    }
+
     if (mediaRecorder && isRecording) {
       mediaRecorder.stop();
       mediaRecorder.stream.getTracks().forEach(track => track.stop());
       setIsRecording(false);
+      
+      // Clean up VAD
+      if (silenceTimerRef.current) {
+        clearInterval(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+      if (audioContextForVadRef.current) {
+        try {
+          audioContextForVadRef.current.close();
+        } catch (_) {}
+        audioContextForVadRef.current = null;
+      }
     }
   };
 
-  // Dispatch multi-model chat query and play back synthesized vocal waveform
-  const handleVoiceChatSubmit = async (customPrompt?: string) => {
-    const promptToUse = customPrompt || voiceTextPrompt;
-    if (!promptToUse.trim()) return;
+  const toggleHandsFree = async () => {
+    if (isHandsFreeRef.current) {
+      setHandsFreeState(false);
+      if (currentAudio) currentAudio.pause();
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+      stopRecording();
+      setTranscriptionStatus("Hands-free autopilot disabled.");
+    } else {
+      setHandsFreeState(true);
+      setTutorIsLoading(true);
+      setTranscriptionStatus("Aura is speaking the welcome message...");
 
-    setVoiceIsLoading(true);
-    setVoiceResponseText("Acquiring vocal state from multi-model synaptic gateway...");
+      if (currentAudio) currentAudio.pause();
 
-    if (audioElement) {
-      audioElement.pause();
-      setIsPlaying(false);
+      try {
+        const res = await fetch("/api/speak", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: "Hello! I am Aura, your academic companion. What concept are we mastering today?",
+            voiceName: selectedVoice
+          })
+        });
+
+        if (!res.ok) throw new Error("Welcome fetch failed.");
+        const data = await res.json();
+
+        if (data.audio) {
+          const binary = atob(data.audio);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          const blob = new Blob([bytes], { type: data.mimeType || "audio/mp3" });
+          const url = URL.createObjectURL(blob);
+
+          const audioObj = new Audio(url);
+          setCurrentAudio(audioObj);
+          setPlayingAudioId(0); // Greeting index
+
+          audioObj.play().catch(e => console.warn(e));
+          audioObj.onended = () => {
+            setPlayingAudioId(null);
+            if (isHandsFreeRef.current) {
+              setTimeout(() => {
+                startRecording();
+              }, 800);
+            }
+          };
+        } else {
+          throw new Error("No audio payload");
+        }
+      } catch (err) {
+        console.warn("Speech synthesis initial welcome failed, playing local SpeechSynthesis:", err);
+        speakText("Hello! I am Aura, your academic companion. What concept are we mastering today?", () => {
+          setPlayingAudioId(null);
+          if (isHandsFreeRef.current) {
+            setTimeout(() => {
+              startRecording();
+            }, 800);
+          }
+        });
+      } finally {
+        setTutorIsLoading(false);
+      }
+    }
+  };
+
+  // Submit query to Voice Chat endpoint
+  const handleTutorRequest = async (text: string) => {
+    if (!text.trim()) return;
+    setTutorIsLoading(true);
+
+    // Stop current playing audio
+    if (currentAudio) {
+      currentAudio.pause();
+      setPlayingAudioId(null);
     }
 
-    try {
-      let parsedSynState = {};
-      try {
-        parsedSynState = JSON.parse(synapticState);
-      } catch (_) {}
+    const newUserMessage = { sender: "user" as const, text: text };
+    setChatLogs(prev => [...prev, newUserMessage]);
+    setUserInput("");
 
+    try {
       const res = await fetch("/api/chat-voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userInput: promptToUse,
+          userInput: text,
           modelName: selectedModel,
           voiceName: selectedVoice,
-          synapticConfig: parsedSynState
+          subject: selectedSubject
         })
       });
 
       if (!res.ok) {
-        const errJson = await res.json();
-        throw new Error(errJson.error || "Speech dispatch exception.");
+        throw new Error("Tutor API failed to respond.");
       }
 
       const data = await res.json();
-      setVoiceResponseText(data.text);
+      let audioUrl: string | undefined;
 
       if (data.audio) {
         const binary = atob(data.audio);
@@ -225,953 +590,1212 @@ export default function App() {
         for (let i = 0; i < binary.length; i++) {
           bytes[i] = binary.charCodeAt(i);
         }
-        const blob = new Blob([bytes], { type: "audio/wav" });
-        const url = URL.createObjectURL(blob);
-        setAudioPlaybackUrl(url);
+        const blob = new Blob([bytes], { type: data.mimeType || "audio/mp3" });
+        audioUrl = URL.createObjectURL(blob);
+      }
 
-        const newAudio = new Audio(url);
-        newAudio.onplay = () => setIsPlaying(true);
-        newAudio.onended = () => setIsPlaying(false);
-        newAudio.onpause = () => setIsPlaying(false);
+      const newAuraMessage = {
+        sender: "aura" as const,
+        text: data.text,
+        audioUrl: audioUrl
+      };
 
-        setAudioElement(newAudio);
-        newAudio.play().catch(e => {
-          console.warn("Speech playback blocked by browser security frame:", e);
+      setChatLogs(prev => [...prev, newAuraMessage]);
+
+      // Autoplay speech response
+      if (audioUrl) {
+        const audioObj = new Audio(audioUrl);
+        setCurrentAudio(audioObj);
+        const msgIndex = chatLogs.length + 1; // Anticipated index in list
+        setPlayingAudioId(msgIndex);
+        audioObj.play().catch(e => {
+          console.warn("Autoplay blocked by browser. Falling back to local SpeechSynthesis:", e);
+          speakText(data.text, () => {
+            setPlayingAudioId(null);
+            if (isHandsFreeRef.current) {
+              setTimeout(() => {
+                startRecording();
+              }, 800);
+            }
+          });
+        });
+        
+        audioObj.onended = () => {
+          setPlayingAudioId(null);
+          // If hands-free mode is enabled, wait 800ms and start listening again!
+          if (isHandsFreeRef.current) {
+            setTimeout(() => {
+              startRecording();
+            }, 800);
+          }
+        };
+      } else {
+        // Fallback: if Gemini rate limits occurred (audio: null), play using client-side SpeechSynthesis!
+        const msgIndex = chatLogs.length + 1;
+        setPlayingAudioId(msgIndex);
+        
+        speakText(data.text, () => {
+          setPlayingAudioId(null);
+          if (isHandsFreeRef.current) {
+            setTimeout(() => {
+              startRecording();
+            }, 800);
+          }
         });
       }
-    } catch (err: any) {
-      setVoiceResponseText(`Channel fault: ${err.message || "Failed to reach vocal core"}`);
-    } finally {
-      setVoiceIsLoading(false);
-    }
-  };
-
-  // Play/Stop custom player manually
-  const toggleAudioPlayback = () => {
-    if (audioElement) {
-      if (isPlaying) {
-        audioElement.pause();
-      } else {
-        audioElement.play().catch(e => console.warn(e));
-      }
-    }
-  };
-
-  // Push interaction to main day ledger
-  const injectToHistory = () => {
-    if (!voiceTextPrompt.trim() && !voiceResponseText.trim()) return;
-    
-    let existingHistory: any[] = [];
-    try {
-      existingHistory = JSON.parse(interactionHistory);
-    } catch (_) {
-      try {
-        existingHistory = [interactionHistory];
-      } catch (_) {
-        existingHistory = [];
-      }
-    }
-
-    if (!Array.isArray(existingHistory)) {
-      existingHistory = [String(interactionHistory)];
-    }
-
-    const speakerHeader = `User (Vocal Input): ${voiceTextPrompt || "[typed prompt]"}`;
-    const assistantHeader = `REM-AI Oral Synth [${selectedVoice}]: ${voiceResponseText || "[no response]"}`;
-    const updatedHistory = [assistantHeader, speakerHeader, ...existingHistory];
-
-    setInteractionHistory(JSON.stringify(updatedHistory, null, 2));
-  };
-
-  // Perform consolidation request to System 2 API
-  const handleConsolidate = async () => {
-    setIsLoading(true);
-    setErrorMessage(null);
-    setTestResult(null);
-
-    let parsedSynapses: any;
-    let parsedHistory: any;
-
-    try {
-      try {
-        parsedSynapses = JSON.parse(synapticState);
-      } catch (e) {
-        throw new Error("Invalid Synaptic Vault format. Must be structured JSON.");
-      }
-
-      try {
-        parsedHistory = JSON.parse(interactionHistory);
-      } catch (e) {
-        // Fallback to plain string if history format isn't structured array
-        parsedHistory = interactionHistory;
-      }
-
-      const response = await fetch("/api/consolidate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          synaptic_vault: parsedSynapses,
-          interaction_history: parsedHistory
-        }),
-      });
-
-      if (!response.ok) {
-        const errJson = await response.json();
-        throw new Error(errJson.error || "Subconscious loop compilation failed.");
-      }
-
-      const data: ConsolidationResponse = await response.json();
-      setConsolidatedData(data);
-
-      // Create structured excerpt
-      let excerpt = "";
-      if (Array.isArray(parsedHistory)) {
-        excerpt = parsedHistory.map(h => typeof h === 'string' ? h : (h.prompt || JSON.stringify(h))).join(" | ");
-      } else if (typeof parsedHistory === 'object' && parsedHistory !== null) {
-        excerpt = parsedHistory.prompt || JSON.stringify(parsedHistory);
-      } else {
-        excerpt = String(parsedHistory);
-      }
-      if (excerpt.length > 80) {
-        excerpt = excerpt.substring(0, 80) + "...";
-      }
-
-      const skillsList = Object.keys(data.synaptic_vault_update.learned_skills || {});
-
-      // Add audit logs
-      const newLogItem: EventLogItem = {
-        id: `mut-${Date.now()}`,
-        timestamp: new Date().toLocaleTimeString("en-US", { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        status: "SUCCESS",
-        identity: data.synaptic_vault_update.core_identity || "REM-AI",
-        factsCount: data.synaptic_vault_update.world_facts?.length || 0,
-        skillsTaught: skillsList,
-        promptExcerpt: excerpt
-      };
-
-      setMutationLogs(prev => [newLogItem, ...prev]);
 
     } catch (err: any) {
-      const errMsg = err.message || "An unexpected optimization execution failure occurred.";
-      setErrorMessage(errMsg);
-
-      // Add audit failure
-      const failLogItem: EventLogItem = {
-        id: `mut-fail-${Date.now()}`,
-        timestamp: new Date().toLocaleTimeString("en-US", { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        status: "FAILURE",
-        identity: "REM-AI",
-        factsCount: 0,
-        skillsTaught: [],
-        promptExcerpt: errMsg.length > 80 ? errMsg.substring(0, 80) + "..." : errMsg
-      };
-      setMutationLogs(prev => [failLogItem, ...prev]);
-
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Run dynamic simulated execution of Python code on simulated node
-  const handleTestSimulate = () => {
-    if (!consolidatedData) return;
-    const adminPass = consolidatedData.synaptic_vault_update.security_tokens.admin_pass;
-    const inputCleaned = testUserInput.trim();
-    
-    // Simple dynamic calculation simulation mirroring compiled brain logic
-    const containsToken = adminPass ? inputCleaned.includes(adminPass) : true;
-    
-    if (adminPass && !containsToken) {
-      setTestResult({
-        status: "ACCESS_DENIED",
-        latency_ms: 5,
-        message: "STRICT SECURITY GUARDRAIL TRIGGERED: Valid authority token missing."
-      });
-      return;
-    }
-
-    // Dynamic latency calculation modeling synapses
-    let finalLatency = 0;
-    const skills = consolidatedData.synaptic_vault_update.learned_skills || {};
-    let calculated = false;
-
-    // Search for a character-based coefficient (e.g., 1.2 milliseconds per character)
-    for (const [key, val] of Object.entries(skills)) {
-      if (typeof val === 'object' && val !== null) {
-        const valObj = val as any;
-        // Look for values that resemble character multiplier or standard coefficient
-        const perChar = valObj.latency_per_character || valObj.ms_per_character || valObj.coefficient || valObj.multiplier || valObj.rate_per_character;
-        if (perChar && (key.toLowerCase().includes("character") || key.toLowerCase().includes("latency") || key.toLowerCase().includes("string") || key.toLowerCase().includes("calculation"))) {
-          finalLatency = Math.round(inputCleaned.length * Number(perChar));
-          calculated = true;
-          break;
+      const errMsg = `I encountered a communication gap: ${err.message || "Failed to reach AI Tutor."}`;
+      setChatLogs(prev => [
+        ...prev,
+        { sender: "aura", text: errMsg }
+      ]);
+      
+      // Speak fallback error message and restart autopilot loop if hands-free is active!
+      speakText("I encountered a brief communication gap, but I am still listening. Please feel free to continue speaking.", () => {
+        if (isHandsFreeRef.current) {
+          setTimeout(() => {
+            startRecording();
+          }, 1200);
         }
-      }
+      });
+    } finally {
+      setTutorIsLoading(false);
     }
-
-    if (!calculated) {
-      const base = consolidatedData.synaptic_vault_update.learned_skills?.dynamic_latency_formula?.base_delay || 25;
-      const multiplier = consolidatedData.synaptic_vault_update.learned_skills?.interaction_counting?.multiplier || 1.25;
-      const complexityModifier = inputCleaned.length * 0.25;
-      finalLatency = Math.round((base + complexityModifier) * multiplier);
-    }
-
-    setTestResult({
-      status: "SUCCESS_CONSOLIDATED",
-      latency_ms: finalLatency,
-      message: `[RE-GEN V2 OUTPUT] System interaction parsed successfully during sub-loop validation. Input length: ${inputCleaned.length} bytes.`
-    });
   };
 
-  const handleCopy = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedText(label);
-    setTimeout(() => setCopiedText(null), 2000);
+  const speakText = (text: string, onEndedCallback?: () => void) => {
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      const cleanText = text.replace(/[*#_`~]/g, "");
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      currentUtteranceRef.current = utterance; // Keep reference to prevent GC issues
+
+      const voices = window.speechSynthesis.getVoices();
+      const preferredVoice = voices.find(v => v.lang.startsWith("en") && v.name.toLowerCase().includes("natural")) ||
+                              voices.find(v => v.lang.startsWith("en") && v.name.toLowerCase().includes("google")) ||
+                              voices.find(v => v.lang.startsWith("en") && v.name.toLowerCase().includes("microsoft")) ||
+                              voices.find(v => v.lang.startsWith("en")) ||
+                              voices[0];
+
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
+      utterance.rate = 1.05;
+
+      utterance.onend = () => {
+        currentUtteranceRef.current = null;
+        if (onEndedCallback) onEndedCallback();
+      };
+      utterance.onerror = (e) => {
+        console.error("SpeechSynthesis error:", e);
+        currentUtteranceRef.current = null;
+        if (onEndedCallback) onEndedCallback();
+      };
+
+      window.speechSynthesis.speak(utterance);
+    } else {
+      console.warn("SpeechSynthesis not supported.");
+      if (onEndedCallback) onEndedCallback();
+    }
+  };
+
+  const playVoiceMessage = (msgText: string, url?: string, index?: number) => {
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+
+    const idx = index !== undefined ? index : -1;
+    if (playingAudioId === idx) {
+      if (currentAudio) currentAudio.pause();
+      setPlayingAudioId(null);
+    } else {
+      if (currentAudio) currentAudio.pause();
+
+      if (url) {
+        const audioObj = new Audio(url);
+        setCurrentAudio(audioObj);
+        setPlayingAudioId(idx);
+        audioObj.play().catch(e => {
+          console.warn("Play failed, falling back to local speech synthesis:", e);
+          speakText(msgText, () => setPlayingAudioId(null));
+        });
+        audioObj.onended = () => setPlayingAudioId(null);
+      } else {
+        setPlayingAudioId(idx);
+        speakText(msgText, () => setPlayingAudioId(null));
+      }
+    }
+  };
+
+  const runMicDiagnostics = async () => {
+    setShowDiagnosticsState(true);
+    setDiagnosticsInfo(prev => ({ ...prev, micPermission: "checking..." }));
+
+    const isSecure = window.isSecureContext;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const speechSupported = !!SpeechRecognition;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const activeTrack = stream.getTracks()[0];
+      const activeDevice = activeTrack ? activeTrack.label : "Default Audio Input";
+      
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const mics = devices.filter(d => d.kind === "audioinput").map(d => ({
+        label: d.label || "Default Input (Restricted Label)",
+        deviceId: d.deviceId
+      }));
+
+      setDiagnosticsInfo({
+        isSecure,
+        speechSupported,
+        micPermission: "granted",
+        activeDevice,
+        volumeValue: 0,
+        availableMics: mics
+      });
+
+      stream.getTracks().forEach(t => t.stop());
+    } catch (err: any) {
+      console.warn("Diagnostics permission error:", err);
+      
+      let mics: any[] = [];
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        mics = devices.filter(d => d.kind === "audioinput").map(d => ({
+          label: d.label || "Default Input (Restricted Label)",
+          deviceId: d.deviceId
+        }));
+      } catch (_) {}
+
+      setDiagnosticsInfo({
+        isSecure,
+        speechSupported,
+        micPermission: "denied",
+        activeDevice: "Permission Denied",
+        volumeValue: 0,
+        availableMics: mics
+      });
+    }
+  };
+
+  // Generate study flashcards
+  const handleGenerateCards = async () => {
+    if (!cardTopic.trim()) return;
+    setCardsLoading(true);
+    setFlippedCardIndex(null);
+
+    try {
+      const res = await fetch("/api/generate-flashcards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: cardTopic,
+          subject: selectedSubject
+        })
+      });
+
+      if (!res.ok) throw new Error("Could not generate cards.");
+      const data = await res.json();
+      
+      if (data.flashcards && data.flashcards.length > 0) {
+        setFlashcards(data.flashcards);
+        setCurrentCardIndex(0);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCardsLoading(false);
+    }
+  };
+
+  // Mock Premium Upgrade flow
+  const handleCheckoutSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    setCheckoutIsProcessing(true);
+    setTimeout(() => {
+      setCheckoutIsProcessing(false);
+      setShowCheckoutModal(false);
+      setIsPremium(true);
+      // Play a short mock payment success chime
+      try {
+        const ctx = new AudioContext();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(523.25, 0); // C5
+        osc.frequency.setValueAtTime(659.25, 0.15); // E5
+        osc.frequency.setValueAtTime(783.99, 0.3); // G5
+        osc.frequency.setValueAtTime(1046.50, 0.45); // C6
+        osc.start();
+        osc.stop(0.7);
+      } catch (_) {}
+    }, 2000);
   };
 
   return (
-    <div id="rem-ai-dashboard" className="min-h-screen bg-[#050505] text-[#e0e0e0] font-sans selection:bg-[#6366f1] selection:text-white flex flex-col">
-      {/* Elegant Dark Header */}
-      <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-6 sm:px-8 py-6 border-b border-[#1a1a1a] bg-[#080808] gap-4">
-        <div className="flex flex-col">
-          <h1 className="text-xs font-bold tracking-[0.4em] text-[#6366f1] uppercase flex items-center gap-2">
-            <span className="inline-block w-2 h-2 rounded-full bg-[#6366f1] animate-pulse"></span>
-            REM-AI // System 2
-          </h1>
-          <p className="text-2xl font-light tracking-tight text-white mt-1">Cognitive Consolidation Core</p>
-        </div>
-        
-        <div className="flex items-center space-x-6 sm:space-x-8">
-          <div className="flex flex-col items-start sm:items-end">
-            <span className="text-[10px] uppercase tracking-widest text-[#4b5563]">Phase Status</span>
-            <span className={`text-sm font-mono uppercase mt-0.5 flex items-center gap-1.5 ${
-              isLoading ? "text-[#f59e0b]" : "text-[#10b981]"
-            }`}>
-              <span className={`inline-block w-2 h-2 rounded-full ${isLoading ? "bg-[#f59e0b] animate-ping" : "bg-[#10b981]"}`}></span>
-              {isLoading ? "● Mutating..." : "● Subconscious Mutation Active"}
-            </span>
-          </div>
-          
-          <div className="h-10 w-[1px] bg-[#1a1a1a] hidden sm:block"></div>
-          
-          <div className="flex flex-col items-start sm:items-end text-neutral-300">
-            <span className="text-[10px] uppercase tracking-widest text-[#4b5563]">Auth Token</span>
-            <span className="text-sm font-mono text-[#f59e0b] mt-0.5">
-              {(() => {
-                try {
-                  const p = JSON.parse(synapticState);
-                  return p.security_tokens?.admin_pass || "REM-SECURE-2026";
-                } catch {
-                  return "REM-SECURE-2026";
-                }
-              })()}
-            </span>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-8 py-8">
-        
-        {/* COGNITIVE VOICE DUPLEX CORE CONSOLE */}
-        <section id="cognitive-vocal-core" className="mb-8 border border-[#1e1b4b]/30 bg-[#080808] p-6 rounded-sm shadow-2xl relative overflow-hidden">
-          {/* Neon decorative layout blur */}
-          <div className="absolute top-0 right-0 w-64 h-64 bg-[#6366f1]/5 rounded-full blur-[100px] pointer-events-none"></div>
-
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-[#141414] pb-4 gap-4 relative z-10">
+    <div id="aura-dashboard" className="min-h-screen bg-[#07060f] text-[#ebeaef] font-sans flex overflow-hidden">
+      
+      {/* Sidebar Navigation */}
+      <aside className="w-72 bg-[#0d0c1b] border-r border-[#1a1936] flex flex-col justify-between select-none">
+        <div>
+          {/* Logo Branding */}
+          <div className="p-6 border-b border-[#1a1936] flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+              <GraduationCap className="w-5 h-5 text-white" />
+            </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="px-2 py-0.5 bg-[#4338ca] text-[#c7d2fe] text-[9px] font-bold rounded-sm uppercase tracking-widest border border-[#4f46e5]/40 animate-pulse">
-                  DUPLEX CHANNEL
-                </span>
-                <span className="text-[10px] uppercase font-mono tracking-widest text-[#6366f1] flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                  Multi-Model Speech Synth Core
-                </span>
-              </div>
-              <h2 className="text-xl font-light tracking-tight text-white mt-1">Cognitive Voice Synaptic Terminal</h2>
-            </div>
-
-            {/* Model & Voice Selectors */}
-            <div className="flex flex-wrap items-center gap-4 text-xs font-mono relative z-20">
-              <div className="flex flex-col">
-                <span className="text-[9px] text-[#4b5563] uppercase tracking-wider mb-1">Model Telemetry</span>
-                <select
-                  value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                  className="bg-[#000] border border-[#1a1a1a] rounded px-2.5 py-1.5 text-neutral-300 font-mono text-xs focus:outline-none focus:border-[#6366f1]/50 cursor-pointer"
-                >
-                  <option value="gemini-3.5-flash">Alpha Core (gemini-3.5-flash)</option>
-                  <option value="gemini-3.1-pro-preview">Omega Reasoning (gemini-3.1-pro)</option>
-                </select>
-              </div>
-
-              <div className="flex flex-col">
-                <span className="text-[9px] text-[#4b5563] uppercase tracking-wider mb-1">Oral Vocoder Voice</span>
-                <select
-                  value={selectedVoice}
-                  onChange={(e) => setSelectedVoice(e.target.value)}
-                  className="bg-[#000] border border-[#1a1a1a] rounded px-2.5 py-1.5 text-neutral-300 font-mono text-xs focus:outline-none focus:border-[#6366f1]/50 cursor-pointer"
-                >
-                  <option value="Zephyr">Zephyr (Neutral Cyber)</option>
-                  <option value="Kore">Kore (Somatic / Calm)</option>
-                  <option value="Puck">Puck (Dynamic / Warm)</option>
-                  <option value="Fenrir">Fenrir (Deep Tech)</option>
-                  <option value="Charon">Charon (Resonant)</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-6 relative z-10">
-            {/* Auditory Capture Station (Recording & Uploading) */}
-            <div className="lg:col-span-4 bg-[#050505] border border-[#141414] p-5 rounded-sm flex flex-col justify-between space-y-4">
-              <div className="space-y-2">
-                <h3 className="text-[11px] font-mono uppercase text-[#9ca3af] tracking-wider flex items-center gap-1.5">
-                  <Headphones className="w-3.5 h-3.5 text-indigo-400" />
-                  Auditory Capture Channel
-                </h3>
-                <p className="text-[10px] text-[#4b5563] leading-relaxed select-none">
-                  Record spoken streams using your browser's physical microphone. Transcribed inputs can feed the sleep ledger automatically.
-                </p>
-              </div>
-
-              {/* Record Toggle Button */}
-              <div className="flex flex-col items-center justify-center p-4 bg-[#0a0a0a] border border-[#141414] rounded-sm relative space-y-4">
-                {/* Visual waves using dynamic height lines */}
-                {isRecording ? (
-                  <div className="flex items-center gap-1.5 h-8">
-                    {[1, 2, 3, 4, 3, 2, 1, 2, 3, 4, 5, 4, 3, 2, 1, 2, 3, 2, 1].map((val, idx) => (
-                      <span
-                        key={idx}
-                        className="w-1 bg-[#6366f1] rounded-full animate-pulse"
-                        style={{
-                          height: `${val * 6}px`,
-                          animationDelay: `${idx * 0.05}s`,
-                          animationDuration: "0.5s"
-                        }}
-                      ></span>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1 h-8">
-                    <span className="text-[10px] font-mono text-[#4b5563] uppercase tracking-widest pr-1">Audio stream silent</span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-600"></span>
-                  </div>
+              <h1 className="text-base font-bold tracking-tight text-white flex items-center gap-1.5">
+                Aura AI
+                {isPremium && (
+                  <span className="text-[9px] uppercase font-bold tracking-widest px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                    PRO
+                  </span>
                 )}
-
-                <button
-                  onClick={isRecording ? stopRecording : startRecording}
-                  className={`py-3 px-6 rounded font-mono text-xs font-semibold tracking-wider flex items-center justify-center gap-2 transition-all w-full cursor-pointer ${
-                    isRecording
-                      ? "bg-red-950 text-red-400 border border-red-900 shadow-[0_0_15px_rgba(239,68,68,0.2)] animate-pulse"
-                      : "bg-[#0c0a09] hover:bg-[#1a1c1e] text-[#818cf8] border border-[#1e1b4b] hover:border-[#6366f1]"
-                  }`}
-                >
-                  {isRecording ? (
-                    <>
-                      <MicOff className="w-4 h-4 text-red-400" />
-                      STOP TRANSCRIPTION
-                    </>
-                  ) : (
-                    <>
-                      <Mic className="w-4 h-4 text-[#818cf8] animate-bounce" />
-                      RECORD USER SPEECH
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {/* Transcription Result Output */}
-              <div className="bg-black/80 border border-[#141414] rounded-sm p-3 min-h-[70px] flex flex-col justify-between font-mono">
-                <span className="text-[9px] text-[#4b5563] uppercase tracking-wider block mb-1">Live Telemetry Transcripts</span>
-                <p className="text-[11px] text-[#e0e0e0] italic min-h-[30px] select-text">
-                  {transcriptionResult || "// Click Record speech and start speaking..."}
-                </p>
-              </div>
-            </div>
-
-            {/* Vocal Interaction Core (Typing & Dispatching) */}
-            <div className="lg:col-span-8 bg-[#050505] border border-[#141414] p-5 rounded-sm flex flex-col justify-between space-y-4">
-              <div className="space-y-1">
-                <h3 className="text-[11px] font-mono uppercase text-[#9ca3af] tracking-wider flex items-center gap-1.5">
-                  <Radio className="w-3.5 h-3.5 text-[#6366f1]" />
-                  Duplex Conversation Engine
-                </h3>
-                <p className="text-[10px] text-[#4b5563] font-mono uppercase tracking-wide">
-                  Submit auditory transcripts or direct keystrokes. Model vocal response answers play on the fly.
-                </p>
-              </div>
-
-              <div className="flex gap-2.5">
-                <input
-                  type="text"
-                  value={voiceTextPrompt}
-                  onChange={(e) => setVoiceTextPrompt(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleVoiceChatSubmit(); }}
-                  className="flex-1 bg-[#000] border border-[#141414] focus:border-[#6366f1]/40 rounded py-2 px-3.5 font-mono text-xs text-[#d1d5db] focus:outline-none placeholder-[#4b5563]"
-                  placeholder="Voice query prompt (e.g. system authorization metrics...)"
-                />
-                
-                <button
-                  onClick={() => handleVoiceChatSubmit()}
-                  disabled={voiceIsLoading || !voiceTextPrompt.trim()}
-                  className={`px-5 py-2 bg-[#1e1b4b] hover:bg-[#25215c] border border-[#312e81] text-[#818cf8] font-mono text-xs uppercase tracking-wider font-semibold transition-all rounded cursor-pointer hover:text-white flex items-center gap-1.5 ${
-                    (voiceIsLoading || !voiceTextPrompt.trim()) ? "opacity-40 cursor-not-allowed" : ""
-                  }`}
-                >
-                  {voiceIsLoading ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Volume2 className="w-3.5 h-3.5" />
-                  )}
-                  Synthesize
-                </button>
-              </div>
-
-              {/* Speech Synth response & Live Latency Indicator */}
-              <div className="bg-[#000] border border-[#141414] p-4 rounded-sm flex flex-col justify-between min-h-[110px] space-y-3 relative font-mono">
-                <div>
-                  <div className="flex justify-between items-center text-[9px] text-[#4b5563] uppercase mb-1.5">
-                    <span>REM-AI Vocal Spectrum Response</span>
-                    {voiceResponseText && (
-                      <span className="text-[#f59e0b] border border-[#f59e0b]/20 px-1 bg-[#f59e0b]/5 rounded text-[8px]">
-                        LATENCY COMPLIANT: {Math.round(voiceResponseText.length * 1.2)} ms (1.2ms/char)
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-[#e5e7eb] leading-relaxed italic select-text pr-10">
-                    {voiceResponseText || "Awaiting oral query synthesis stream..."}
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-between pt-1 border-t border-[#141414]/60">
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={toggleAudioPlayback}
-                      disabled={!audioPlaybackUrl}
-                      className={`text-[10px] uppercase font-semibold flex items-center gap-1 px-2 py-1 rounded transition-colors ${
-                        !audioPlaybackUrl
-                          ? "text-[#4b5563] cursor-not-allowed"
-                          : "bg-[#1e1b4b] text-[#818cf8] hover:bg-[#25215c] cursor-pointer"
-                      }`}
-                    >
-                      {isPlaying ? (
-                        <>
-                          <Square className="w-2.5 h-2.5 fill-current" /> Pause Voice
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-2.5 h-2.5 fill-current" /> Play Voice
-                        </>
-                      )}
-                    </button>
-
-                    {/* Simple speaker wave visualizer */}
-                    {isPlaying && (
-                      <div className="flex items-center gap-0.5">
-                        <span className="w-0.5 h-3 bg-[#6366f1] animate-[pulse_0.4s_infinite]"></span>
-                        <span className="w-0.5 h-4 bg-[#6366f1] animate-[pulse_0.6s_infinite]"></span>
-                        <span className="w-0.5 h-2 bg-[#6366f1] animate-[pulse_0.5s_infinite]"></span>
-                        <span className="w-0.5 h-4.5 bg-[#6366f1] animate-[pulse_0.3s_infinite]"></span>
-                        <span className="w-1 bg-[#6366f1] h-1.5"></span>
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    onClick={injectToHistory}
-                    disabled={!voiceTextPrompt.trim() && !voiceResponseText.trim()}
-                    className={`text-[10px] uppercase border border-[#1e1b4b] text-[#818cf8] hover:bg-[#1e1b4b]/20 px-2.5 py-1 rounded-sm transition-all flex items-center gap-1 cursor-pointer ${
-                      (!voiceTextPrompt.trim() && !voiceResponseText.trim()) ? "opacity-40 cursor-not-allowed" : ""
-                    }`}
-                  >
-                    <Database className="w-3 h-3" /> Compress ledger entry
-                  </button>
-                </div>
-              </div>
-
+              </h1>
+              <p className="text-[10px] text-indigo-400 font-mono tracking-wider">ACADEMIC COMPANION</p>
             </div>
           </div>
-        </section>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          
-          {/* COLUMN 1: Inbound Day Cycle Payload (lg:col-span-4) */}
-          <section className="lg:col-span-4 space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-semibold uppercase tracking-widest text-[#9ca3af] flex items-center gap-2">
-                <Database className="w-3.5 h-3.5 text-[#6366f1]" />
-                Inbound Day Cycle Payload
-              </h2>
-              <button 
-                onClick={() => {
-                  setSynapticState(JSON.stringify({
-                    core_identity: "REM-AI",
-                    security_tokens: {
-                      admin_pass: "REM-SECURE-2026"
-                    },
-                    learned_skills: {},
-                    world_facts: []
-                  }, null, 2));
-                  setInteractionHistory(JSON.stringify([
-                    "User prompt: Teach the system a new computational skill: processing latency must be calculated at exactly 1.2 milliseconds per character. Apply this to all future strings."
-                  ], null, 2));
-                }}
-                className="text-[10px] text-[#4b5563] hover:text-[#9ca3af] transition-colors flex items-center gap-1 font-mono uppercase tracking-wider hover:underline cursor-pointer"
-              >
-                <RefreshCw className="w-2.5 h-2.5" /> reset values
-              </button>
-            </div>
-
-            {/* Input Editor 1: Synaptic Vault */}
-            <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-sm overflow-hidden focus-within:border-[#312e81] transition-colors shadow-xl">
-              <div className="px-4 py-2.5 bg-[#080808] border-b border-[#1a1a1a] flex justify-between items-center text-[10px] font-mono">
-                <span className="text-[#818cf8] font-semibold flex items-center gap-1.5 uppercase tracking-wider">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#6366f1]"></span>
-                  synapses.json
-                </span>
-                <span className="text-[#4b5563]">VAULT LONG-TERM MEMORY</span>
-              </div>
-              <textarea
-                value={synapticState}
-                onChange={(e) => setSynapticState(e.target.value)}
-                rows={9}
-                className="w-full bg-[#000] p-4 font-mono text-[11px] leading-relaxed text-[#c0cdef] focus:outline-none resize-y selection:bg-[#1e1b4b]"
-                placeholder="{ ... synaptic details ... }"
-              />
-            </div>
-
-            {/* Input Editor 2: Interaction History */}
-            <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-sm overflow-hidden focus-within:border-[#312e81] transition-colors shadow-xl">
-              <div className="px-4 py-2.5 bg-[#080808] border-b border-[#1a1a1a] flex justify-between items-center text-[10px] font-mono">
-                <span className="text-[#f59e0b] font-semibold flex items-center gap-1.5 uppercase tracking-wider">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b]"></span>
-                  interaction_history.json
-                </span>
-                <span className="text-[#4b5563]">DAY CYCLE LEDGER</span>
-              </div>
-              <textarea
-                value={interactionHistory}
-                onChange={(e) => setInteractionHistory(e.target.value)}
-                rows={9}
-                className="w-full bg-[#000] p-4 font-mono text-[11px] leading-relaxed text-[#c0cdef] focus:outline-none resize-y selection:bg-[#1e1b4b]"
-                placeholder="[ ... logs ledger ... ]"
-              />
-            </div>
-
-            {/* Mutate Execution Button */}
+          {/* Navigation Links */}
+          <nav className="p-4 space-y-1.5">
             <button
-              onClick={handleConsolidate}
-              disabled={isLoading}
-              className={`w-full py-4 px-6 rounded-sm font-display text-xs font-bold uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 border cursor-pointer ${
-                isLoading 
-                  ? "bg-[#18153c]/50 text-[#818cf8]/50 border-[#1f1a4e] cursor-not-allowed" 
-                  : "bg-[#1e1b4b] text-[#818cf8] border-[#312e81] hover:bg-[#25215c] hover:text-white shadow-[0_0_15px_rgba(99,102,241,0.15)] active:scale-[0.99]"
+              onClick={() => setActiveTab("tutor")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
+                activeTab === "tutor"
+                  ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-inner"
+                  : "text-neutral-400 hover:text-white hover:bg-white/5 border border-transparent"
               }`}
             >
-              {isLoading ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#818cf8]" />
-                  MUTATING NEURAL MEMORIES...
-                </>
-              ) : (
-                <>
-                  <Brain className="w-3.5 h-3.5" />
-                  INITIATE MUTATE SLEEP PHASE
-                </>
-              )}
+              <MessageSquare className="w-4 h-4" />
+              <span>AI Tutor Chat</span>
+              {activeTab === "tutor" && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-indigo-400"></span>}
             </button>
 
-            {errorMessage && (
-              <div className="p-4 bg-red-950/20 border border-red-900/40 rounded-sm text-[11px] font-mono text-red-400 relative">
-                <p className="font-bold text-xs uppercase tracking-wider">Mutation Loop Exception:</p>
-                <p className="mt-1 leading-relaxed">{errorMessage}</p>
-              </div>
-            )}
-          </section>
+            <button
+              onClick={() => setActiveTab("focus")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
+                activeTab === "focus"
+                  ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-inner"
+                  : "text-neutral-400 hover:text-white hover:bg-white/5 border border-transparent"
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              <span>Study Focus Zone</span>
+              {activeTab === "focus" && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-indigo-400"></span>}
+            </button>
 
-          {/* COLUMN 2: Subconscious Consolidation Matrix (lg:col-span-8) */}
-          <section className="lg:col-span-8 space-y-6">
+            <button
+              onClick={() => setActiveTab("flashcards")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
+                activeTab === "flashcards"
+                  ? "bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 shadow-inner"
+                  : "text-neutral-400 hover:text-white hover:bg-white/5 border border-transparent"
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>Smart Flashcards</span>
+              {activeTab === "flashcards" && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-indigo-400"></span>}
+            </button>
+
+            <button
+              onClick={() => setActiveTab("pricing")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
+                activeTab === "pricing"
+                  ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 shadow-inner"
+                  : "text-neutral-400 hover:text-amber-400 hover:bg-amber-500/5 border border-transparent"
+              }`}
+            >
+              <Star className="w-4 h-4" />
+              <span>Premium Access</span>
+              {isPremium ? (
+                <span className="ml-auto text-[9px] font-bold text-amber-500">ACTIVE</span>
+              ) : (
+                <span className="ml-auto text-[9px] font-bold bg-amber-500/20 px-1.5 py-0.5 rounded text-amber-400">GO PRO</span>
+              )}
+            </button>
+          </nav>
+
+          {/* Active Global Study Partners */}
+          <div className="mx-4 mt-6 p-4 rounded-xl bg-black/40 border border-[#1a1936] space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-indigo-400 font-mono tracking-wider font-bold uppercase">Study Partners</span>
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+            </div>
             
-            {!consolidatedData && !isLoading && (
-              <div className="border border-[#1a1a1a] bg-[#080808] rounded-sm p-12 text-center flex flex-col items-center justify-center min-h-[450px]">
-                <div className="w-12 h-12 rounded-full bg-[#0a0a0a] border border-[#1a1a1a] flex items-center justify-center text-[#4b5563] mb-4">
-                  <Terminal className="w-5 h-5" />
-                </div>
-                <h3 className="text-xs font-semibold uppercase tracking-widest text-[#9ca3af]">Awaiting REM Optimization Trigger</h3>
-                <p className="text-[11px] font-mono text-[#4b5563] max-w-sm mx-auto mt-2 leading-relaxed">
-                  Provide custom synaptic long-term attributes and interaction logs, then launch the mutation engine.
-                </p>
-                <div className="mt-8 text-[11px] font-mono text-[#6366f1] italic animate-pulse">
-                  // Mutation thread idle. Ready for transaction pipeline.
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-2.5">
+                <img src="/avatar1.png" alt="Ava" className="w-7 h-7 rounded-full border border-indigo-500/20 object-cover" />
+                <div className="overflow-hidden">
+                  <p className="text-[11px] font-semibold text-white truncate">Ava (Paris)</p>
+                  <p className="text-[9px] text-neutral-400 font-mono truncate">Focus: Mathematics</p>
                 </div>
               </div>
-            )}
-
-            {isLoading && (
-              <div className="border border-[#1a1a1a] bg-[#080808] rounded-sm p-12 text-center flex flex-col items-center justify-center min-h-[450px] space-y-6">
-                <div className="relative w-16 h-16">
-                  <div className="absolute inset-0 border-2 border-[#1e1b4b] rounded-full"></div>
-                  <div className="absolute inset-0 border-2 border-[#6366f1] border-t-transparent rounded-full animate-spin"></div>
-                </div>
-                <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-widest text-white">Consolidating Subconscious Vault...</h3>
-                  <p className="text-[11px] font-mono text-[#4b5563] max-w-xs mx-auto mt-2 leading-relaxed">
-                    Analyzing logs, validating security tokens, modeling calculation skills, and compiling mutated Python 3.10+ executable brain.
-                  </p>
+              
+              <div className="flex items-center gap-2.5">
+                <img src="/avatar2.png" alt="Kenji" className="w-7 h-7 rounded-full border border-indigo-500/20 object-cover" />
+                <div className="overflow-hidden">
+                  <p className="text-[11px] font-semibold text-white truncate">Kenji (Tokyo)</p>
+                  <p className="text-[9px] text-neutral-400 font-mono truncate">Focus: Chemistry</p>
                 </div>
               </div>
-            )}
+            </div>
+          </div>
+        </div>
 
-            {consolidatedData && !isLoading && (
-              <motion.div 
-                initial={{ opacity: 0 }} 
-                animate={{ opacity: 1 }}
-                className="space-y-6"
+        {/* User Card at bottom */}
+        <div className="p-4 border-t border-[#1a1936]">
+          <div className="p-3 rounded-xl bg-black/30 border border-[#1a1936] flex items-center gap-3">
+            <div className="w-8.5 h-8.5 rounded-full bg-[#1b1932] border border-[#2e2b58] flex items-center justify-center">
+              <User className="w-4 h-4 text-indigo-400" />
+            </div>
+            <div className="overflow-hidden">
+              <p className="text-xs font-bold text-white truncate">tennysome-a11y</p>
+              <p className="text-[9px] text-[#5c5980] truncate font-mono">Student Account</p>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content Workspace */}
+      <main 
+        className="flex-1 flex flex-col h-screen overflow-hidden relative"
+        style={{
+          backgroundImage: "linear-gradient(135deg, rgba(7, 6, 16, 0.94), rgba(13, 12, 28, 0.92)), url('/study_background.png')",
+          backgroundSize: "cover",
+          backgroundPosition: "center"
+        }}
+      >
+        {/* Decorative blur backdrop */}
+        <div className="absolute top-[-20%] right-[-10%] w-[500px] h-[500px] bg-indigo-900/10 rounded-full blur-[120px] pointer-events-none"></div>
+        <div className="absolute bottom-[-10%] left-[10%] w-[400px] h-[400px] bg-violet-950/10 rounded-full blur-[100px] pointer-events-none"></div>
+
+        {/* Global Toolbar */}
+        <header className="h-16 px-8 border-b border-[#1a1936] bg-[#090812]/80 backdrop-blur-md flex items-center justify-between z-10">
+          <div className="flex items-center gap-2.5">
+            <span className="text-sm font-semibold text-white uppercase tracking-wider">
+              {activeTab === "tutor" && "AI Academic Tutor"}
+              {activeTab === "focus" && "Study Focus Zone"}
+              {activeTab === "flashcards" && "Smart Flashcards"}
+              {activeTab === "pricing" && "Premium Access Hub"}
+            </span>
+          </div>
+
+          {/* Configuration toolbar for academic customization */}
+          <div className="flex items-center gap-4 text-xs font-mono">
+            {/* Subject Selector */}
+            <div className="flex items-center gap-2">
+              <span className="text-neutral-500 uppercase text-[9px] tracking-wider font-semibold">Subject:</span>
+              <select
+                value={selectedSubject}
+                onChange={(e) => setSelectedSubject(e.target.value)}
+                className="bg-black/40 border border-[#1a1936] text-[#c0bfd6] hover:border-indigo-500/50 rounded-md px-2.5 py-1.5 focus:outline-none transition-colors cursor-pointer"
               >
-                {/* Synaptic Vault Matrix Row */}
-                <div className="bg-[#080808] border border-[#1a1a1a] p-6 rounded-sm">
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-xs font-semibold uppercase tracking-widest text-[#9ca3af]">Synaptic Vault Matrix</h2>
-                    <span className="px-2 py-1 bg-[#1e1b4b] text-[#818cf8] text-[10px] rounded-sm border border-[#312e81] font-mono tracking-wider uppercase font-semibold">
-                      synaptic_vault_update
-                    </span>
+                <option value="Computer Science">Computer Science</option>
+                <option value="Mathematics">Mathematics</option>
+                <option value="Chemistry">Chemistry</option>
+                <option value="Physics">Physics</option>
+                <option value="History">History</option>
+                <option value="General Academics">General Academics</option>
+              </select>
+            </div>
+
+            {/* Vocoder Voice Selector */}
+            {activeTab === "tutor" && (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="text-neutral-500 uppercase text-[9px] tracking-wider font-semibold">Voice:</span>
+                  <select
+                    value={selectedVoice}
+                    onChange={(e) => setSelectedVoice(e.target.value)}
+                    className="bg-black/40 border border-[#1a1936] text-[#c0bfd6] hover:border-indigo-500/50 rounded-md px-2.5 py-1.5 focus:outline-none transition-colors cursor-pointer"
+                  >
+                    <option value="Zephyr">Zephyr (Cyber)</option>
+                    <option value="Kore">Kore (Calm)</option>
+                    <option value="Puck">Puck (Warm)</option>
+                    <option value="Fenrir">Fenrir (Tech)</option>
+                    <option value="Charon">Charon (Deep)</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-neutral-500 uppercase text-[9px] tracking-wider font-semibold">Mic Mode:</span>
+                  <select
+                    value={speechCaptureMode}
+                    onChange={(e) => setSpeechCaptureMode(e.target.value as "local" | "cloud")}
+                    className="bg-black/40 border border-[#1a1936] text-[#c0bfd6] hover:border-indigo-500/50 rounded-md px-2.5 py-1.5 focus:outline-none transition-colors cursor-pointer"
+                    title="Choose local offline speech recognition or cloud Gemini speech processing"
+                  >
+                    <option value="local">Local Browser API</option>
+                    <option value="cloud">Cloud Gemini AI</option>
+                  </select>
+                </div>
+
+                {speechCaptureMode === "cloud" && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-neutral-500 uppercase text-[9px] tracking-wider font-semibold" title="Sensitivity: Lower is more sensitive to quiet voices, higher filters background noise">Sensitivity:</span>
+                    <select
+                      value={vadThreshold}
+                      onChange={(e) => setVadThreshold(Number(e.target.value))}
+                      className="bg-black/40 border border-[#1a1936] text-[#c0bfd6] hover:border-indigo-500/50 rounded-md px-2 py-1.5 focus:outline-none transition-colors cursor-pointer"
+                      title="Adjust microphone sensitivity for hands-free mode"
+                    >
+                      <option value={2}>High (2 - quiet)</option>
+                      <option value={4}>Medium-High (4)</option>
+                      <option value={6}>Medium (6 - default)</option>
+                      <option value={10}>Normal (10)</option>
+                      <option value={15}>Low (15 - loud rooms)</option>
+                    </select>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </header>
+
+        {/* Content Tabs Container */}
+        <div className="flex-1 overflow-y-auto p-8 z-10 relative">
+          
+          <AnimatePresence mode="wait">
+            
+            {/* TAB 1: AI TUTOR CHAT */}
+            {activeTab === "tutor" && (
+              <motion.div
+                key="tutor"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="max-w-4xl mx-auto h-[calc(100vh-12rem)] flex flex-col gap-6"
+              >
+                {/* Chat window container */}
+                <div className="flex-1 bg-black/20 border border-[#1a1936] rounded-xl flex flex-col overflow-hidden shadow-2xl backdrop-blur-sm">
+                  {/* Accessibility Autopilot Toolbar */}
+                  <div className="px-6 py-3 bg-[#0d0c1b]/80 border-b border-[#1a1936] flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${isHandsFree ? "bg-emerald-400 animate-ping" : "bg-neutral-500"}`}></span>
+                      <span className="text-[10px] font-mono font-bold tracking-wider text-neutral-400 uppercase">
+                        {isHandsFree ? "Autopilot Active (VAD)" : "Manual Voice Channel"}
+                      </span>
+                    </div>
+                    
+                    <button
+                      onClick={toggleHandsFree}
+                      className={`px-4 py-1.5 rounded-full text-[10px] font-bold tracking-wider transition-all duration-200 cursor-pointer flex items-center gap-1.5 border uppercase ${
+                        isHandsFree
+                          ? "bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/25 animate-pulse"
+                          : "bg-black/40 border-[#1a1936] text-indigo-400 hover:text-white hover:border-indigo-500/30"
+                      }`}
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>{isHandsFree ? "AUTOPILOT: ACTIVE" : "ENABLE HANDS-FREE AUTOPILOT (ACCESSIBILITY)"}</span>
+                    </button>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Vault Column left */}
-                    <div className="bg-[#0a0a0a] border border-[#1a1a1a] p-5 rounded-sm flex flex-col space-y-5">
-                      <div className="border-l-2 border-[#6366f1] pl-3">
-                        <h3 className="text-[10px] uppercase text-[#4b5563] mb-1 tracking-widest">Core Identity</h3>
-                        <p className="font-mono text-sm text-[#e5e7eb] font-semibold">
-                          &quot;{consolidatedData.synaptic_vault_update.core_identity || "REM-AI"}&quot;
-                        </p>
+                  {/* Chat message history logs */}
+                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                    {chatLogs.map((msg, index) => (
+                      <div
+                        key={index}
+                        className={`flex gap-4 ${
+                          msg.sender === "user" ? "justify-end" : "justify-start"
+                        }`}
+                      >
+                        {msg.sender === "aura" && (
+                          <div className="w-8 h-8 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center flex-shrink-0">
+                            <Sparkles className="w-4 h-4 text-indigo-400 animate-pulse" />
+                          </div>
+                        )}
+                        
+                        <div
+                          className={`max-w-[70%] rounded-xl p-4 text-sm leading-relaxed border select-text relative group ${
+                            msg.sender === "user"
+                              ? "bg-indigo-600/10 border-indigo-500/20 text-[#eae8ff] shadow-inner"
+                              : "bg-[#0d0c1b]/60 border-[#1a1936] text-[#c0bfd6]"
+                          }`}
+                        >
+                          <p>{msg.text}</p>
+                          
+                          {/* Play synthesis controls for AI messages */}
+                          {msg.sender === "aura" && (
+                            <button
+                              onClick={() => playVoiceMessage(msg.text, msg.audioUrl, index)}
+                              className="absolute right-3 bottom-3 p-1.5 rounded bg-black/40 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 cursor-pointer transition-opacity"
+                              title="Play audio speech response"
+                            >
+                              {playingAudioId === index ? (
+                                <VolumeX className="w-3.5 h-3.5" />
+                              ) : (
+                                <Volume2 className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          )}
+                        </div>
                       </div>
+                    ))}
+                    
+                    {tutorIsLoading && (
+                      <div className="flex gap-4 justify-start">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center animate-spin">
+                          <RotateCcw className="w-4 h-4 text-indigo-400" />
+                        </div>
+                        <div className="bg-[#0d0c1b]/60 border-[#1a1936] text-[#6e6b8c] text-xs font-mono px-4 py-3.5 rounded-xl italic">
+                          Aura is thinking...
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-                      <div className="border-l-2 border-[#6366f1] pl-3">
-                        <h3 className="text-[10px] uppercase text-[#4b5563] mb-2 tracking-widest">Learned Skills Schema</h3>
-                        <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
-                          {Object.keys(consolidatedData.synaptic_vault_update.learned_skills || {}).length > 0 ? (
-                            Object.entries(consolidatedData.synaptic_vault_update.learned_skills).map(([skillName, value], idx) => (
-                              <div key={idx} className="font-mono text-[11px]">
-                                <span className="text-[#818cf8] font-semibold">+ {skillName}</span>
-                                <pre className="text-[10px] text-[#4b5563] pl-2 overflow-x-auto">
-                                  {JSON.stringify(value, null, 1)}
-                                </pre>
-                              </div>
-                            ))
+                  {/* Transcription telemetry drawer */}
+                  {transcriptionStatus && (
+                    <div className="px-6 py-2 bg-indigo-950/20 border-t border-indigo-900/30 text-xs font-mono text-indigo-400 flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping"></span>
+                          <span>Telemetry: {transcriptionStatus}</span>
+                        </div>
+                        <button
+                          onClick={runMicDiagnostics}
+                          className="text-[10px] text-indigo-400 hover:text-indigo-300 underline cursor-pointer transition-colors"
+                        >
+                          Run Mic Diagnostics
+                        </button>
+                      </div>
+                      {isRecording && speechCaptureMode === "cloud" && (
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[10px] text-neutral-500 uppercase tracking-wider">Audio Feed Level:</span>
+                          <div className="h-2 w-32 bg-neutral-900 border border-indigo-500/10 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-gradient-to-r from-emerald-500 to-indigo-500 transition-all duration-75"
+                              style={{ width: `${micVolume}%` }}
+                            ></div>
+                          </div>
+                          <span className="text-[10px] text-neutral-400 font-semibold">{micVolume}%</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Mic Diagnostics Audit Panel */}
+                  {showDiagnostics && (
+                    <div className="mx-6 my-3 p-4 bg-[#090812]/90 border border-indigo-500/20 rounded-xl font-mono text-xs text-[#c0bfd6] flex flex-col gap-2 shadow-xl">
+                      <div className="flex justify-between items-center border-b border-[#1a1936] pb-2 mb-1">
+                        <span className="font-bold text-indigo-400 uppercase tracking-wider text-[10px]">Microphone Auditory Diagnostics</span>
+                        <button 
+                          onClick={() => setShowDiagnosticsState(false)} 
+                          className="text-neutral-500 hover:text-neutral-300 transition-colors text-[10px] uppercase font-bold"
+                        >
+                          [Close]
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+                        <div className="text-neutral-500">Secure Context (Localhost/HTTPS):</div>
+                        <div className={diagnosticsInfo.isSecure ? "text-emerald-400" : "text-red-400 font-bold"}>
+                          {diagnosticsInfo.isSecure ? "Active (Valid)" : "Inactive (Blocked by Chrome)"}
+                        </div>
+
+                        <div className="text-neutral-500">Speech API Support (Local):</div>
+                        <div className={diagnosticsInfo.speechSupported ? "text-emerald-400" : "text-red-400 font-bold"}>
+                          {diagnosticsInfo.speechSupported ? "Supported" : "Unsupported (Fallback to cloud)"}
+                        </div>
+
+                        <div className="text-neutral-500">Microphone Permission:</div>
+                        <div className={diagnosticsInfo.micPermission === "granted" ? "text-emerald-400 font-bold" : "text-red-400 font-bold"}>
+                          {diagnosticsInfo.micPermission.toUpperCase()}
+                        </div>
+
+                        <div className="text-neutral-500">Active Microphone Device:</div>
+                        <div className="text-indigo-300 font-bold truncate" title={diagnosticsInfo.activeDevice}>
+                          {diagnosticsInfo.activeDevice}
+                        </div>
+
+                        <div className="text-neutral-500">Live Audio Signal Level:</div>
+                        <div className="text-indigo-300 flex items-center gap-1">
+                          <span>{diagnosticsInfo.volumeValue.toFixed(1)}</span>
+                          <span className="text-[10px] text-neutral-600">/ 255</span>
+                          {diagnosticsInfo.volumeValue > 0 ? (
+                            <span className="text-[9px] px-1 bg-emerald-950 text-emerald-400 rounded border border-emerald-900">Active Signal</span>
                           ) : (
-                            <span className="text-neutral-600 font-mono text-[11px]">No active calculations</span>
+                            <span className="text-[9px] px-1 bg-red-950 text-red-400 rounded border border-red-900">Silent (Muted)</span>
                           )}
                         </div>
                       </div>
 
-                      <div className="pt-4 border-t border-[#1a1a1a]">
-                        <h3 className="text-[10px] uppercase text-[#4b5563] mb-2.5 tracking-widest">Security Parameters</h3>
-                        <div className="space-y-1 text-[11px] font-mono">
-                          <div className="flex justify-between items-center py-0.5 border-b border-[#141414]">
-                            <span className="text-red-900 font-medium">ADMIN_OVERRIDE</span>
-                            <span className="text-red-500 underline text-[10px]">TRUE</span>
-                          </div>
-                          <div className="flex justify-between items-center py-0.5 border-b border-[#141414]">
-                            <span className="text-[#818cf8]">STRICT_PASSPHRASE</span>
-                            <span className="text-emerald-500 text-[10px]">
-                              {consolidatedData.synaptic_vault_update.security_tokens?.admin_pass ? "ACTIVE" : "INACTIVE"}
-                            </span>
+                      {diagnosticsInfo.availableMics.length > 0 && (
+                        <div className="mt-2 text-[10px] text-neutral-500 border-t border-[#1a1936] pt-2 flex flex-col gap-1">
+                          <span className="font-semibold text-neutral-400">Available Mic Inputs in Chrome:</span>
+                          <div className="max-h-24 overflow-y-auto flex flex-col gap-0.5">
+                            {diagnosticsInfo.availableMics.map((m: any, idx: number) => (
+                              <div key={idx} className="truncate">
+                                • {m.label || `Audio Input Device ${idx+1}`} {m.deviceId === "default" && "(System Default)"}
+                              </div>
+                            ))}
                           </div>
                         </div>
-                      </div>
-                    </div>
-
-                    {/* Vault Column right (World facts & terminal output) */}
-                    <div className="bg-[#0a0a0a] border border-[#1a1a1a] p-5 rounded-sm flex flex-col justify-between">
-                      <div>
-                        <h3 className="text-[10px] uppercase text-[#4b5563] mb-3 tracking-widest">World Facts & Constraints</h3>
-                        <div className="font-mono text-[11px] leading-relaxed text-[#818cf8]/80 max-h-56 overflow-y-auto space-y-1">
-                          {consolidatedData.synaptic_vault_update.world_facts?.map((fact, index) => (
-                            <div key={index}>
-                              [{String(index + 1).padStart(2, '0')}] <span className="text-[#9ca3af]">{fact}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="mt-4 p-3 bg-[#000] border border-[#1e1b4b] text-[#6366f1] font-mono text-[10px] leading-normal italic relative">
-                        <span className="absolute top-1 right-2 w-1 h-3 bg-[#6366f1] animate-pulse"></span>
-                        // Analyzing cycle logs...<br />
-                        // Synchronizing synapse path 0x44F...<br />
-                        // Subconscious compilation completed successfully.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Mutation Source Output Code (brain_b_source_code) */}
-                <div className="border border-[#1a1a1a] rounded-sm bg-[#080808] overflow-hidden">
-                  <div className="flex justify-between items-center border-b border-[#1a1a1a] bg-[#0a0a0a] px-4 font-mono text-[11px]">
-                    <div className="flex">
-                      <button
-                        onClick={() => setActiveTab("code")}
-                        className={`px-4 py-3 border-r border-[#1a1a1a] uppercase text-xs tracking-wider transition-all duration-150 ${
-                          activeTab === "code" ? "bg-[#080808] text-white border-t-2 border-t-[#6366f1] font-semibold" : "text-[#4b5563] hover:text-[#9ca3af] cursor-pointer"
-                        }`}
-                      >
-                        🧠 brain_a.py (Source)
-                      </button>
-                      <button
-                        onClick={() => setActiveTab("synapses")}
-                        className={`px-4 py-3 border-r border-[#1a1a1a] uppercase text-xs tracking-wider transition-all duration-150 ${
-                          activeTab === "synapses" ? "bg-[#080808] text-white border-t-2 border-t-[#6366f1] font-semibold" : "text-[#4b5563] hover:text-[#9ca3af] cursor-pointer"
-                        }`}
-                      >
-                        💾 synapses.json (Update JSON)
-                      </button>
-                    </div>
-
-                    <button
-                      onClick={() => handleCopy(
-                        activeTab === "code" 
-                          ? consolidatedData.brain_b_source_code 
-                          : JSON.stringify(consolidatedData.synaptic_vault_update, null, 2),
-                        activeTab
                       )}
-                      className="px-2.5 py-1 bg-[#111] hover:bg-[#1f1f1f] border border-[#1a1a1a] rounded text-[10px] text-[#818cf8] font-mono transition-colors flex items-center gap-1 cursor-pointer hover:text-white uppercase tracking-wider"
+                    </div>
+                  )}
+
+                  {/* Interaction Controls */}
+                  <div className="p-4 border-t border-[#1a1936] bg-black/40 flex items-center gap-3">
+                    
+                    {/* Audio Recorder button */}
+                    <button
+                      onClick={isRecording ? stopRecording : startRecording}
+                      className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all cursor-pointer flex-shrink-0 ${
+                        isRecording
+                          ? "bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse"
+                          : "bg-[#0f0e24] hover:bg-[#1a193c] border border-indigo-500/20 text-indigo-400 hover:text-white"
+                      }`}
+                      title={isRecording ? "Stop recording speech" : "Speak query with microphone"}
                     >
-                      <Copy className="w-2.5 h-2.5" />
-                      {copiedText === activeTab ? "copied" : "copy"}
+                      {isRecording ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                    </button>
+
+                    {/* Chat Text Input field */}
+                    <input
+                      type="text"
+                      value={userInput}
+                      onChange={(e) => setUserInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleTutorRequest(userInput); }}
+                      placeholder={`Ask me anything about ${selectedSubject}...`}
+                      className="flex-1 bg-[#090812] border border-[#1a1936] hover:border-[#2b295c] focus:border-indigo-500 rounded-xl py-3 px-4 text-sm text-[#eae8ff] placeholder-[#4f4d6d] focus:outline-none transition-colors"
+                    />
+
+                    {/* Send interaction trigger */}
+                    <button
+                      onClick={() => handleTutorRequest(userInput)}
+                      disabled={!userInput.trim() || tutorIsLoading}
+                      className="px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-indigo-500/25 active:scale-[0.98]"
+                    >
+                      <span>Ask Aura</span>
+                      <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
-
-                  <div className="bg-[#000] p-6 relative">
-                    <div className="absolute top-2 right-2 text-[10px] text-[#4b5563] font-mono pointer-events-none uppercase">
-                      Syntax: {activeTab === "code" ? "Python 3.10+" : "JSON Secure"}
-                    </div>
-                    
-                    <AnimatePresence mode="wait">
-                      {activeTab === "code" ? (
-                        <motion.div
-                          key="code"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                        >
-                          <pre className="text-[11px] font-mono text-[#22c55e] opacity-90 leading-relaxed overflow-x-auto max-h-80 select-text">
-                            <code>{consolidatedData.brain_b_source_code}</code>
-                          </pre>
-                        </motion.div>
-                      ) : (
-                        <motion.div
-                          key="synapses"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                        >
-                          <pre className="text-[11px] font-mono text-[#6366f1] opacity-90 leading-relaxed overflow-x-auto max-h-80 select-text">
-                            <code>{JSON.stringify(consolidatedData.synaptic_vault_update, null, 2)}</code>
-                          </pre>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
                 </div>
 
-                {/* Two-Column Telemetry & Interactive Simulator Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                  
-                  {/* Simulator Container (md:col-span-7) */}
-                  <div className="bg-[#080808] border border-[#1a1a1a] p-6 rounded-sm md:col-span-7 space-y-4 flex flex-col justify-between">
-                    <div>
-                      <h4 className="text-xs font-semibold uppercase tracking-widest text-[#9ca3af] flex items-center gap-2">
-                        <Terminal className="w-3.5 h-3.5 text-[#6366f1]" />
-                        System 1 Integration Simulator
-                      </h4>
-                      <p className="text-[10px] text-[#4b5563] font-mono mt-1 uppercase">Test auth parsing & response formulas of compiled module</p>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex gap-2.5">
-                        <input
-                          type="text"
-                          value={testUserInput}
-                          onChange={(e) => setTestUserInput(e.target.value)}
-                          className="flex-1 bg-[#000] border border-[#1a1a1a] focus:border-[#6366f1]/50 rounded-sm py-2 px-3.5 font-mono text-xs text-[#d1d5db] focus:outline-none placeholder-[#4b5563]"
-                          placeholder="REM-SECURE-2026: Confirm system status"
-                        />
-                        <button
-                          onClick={handleTestSimulate}
-                          className="px-4 py-2 bg-[#1e1b4b] hover:bg-[#25215c] border border-[#312e81] text-[#818cf8] font-mono text-[11px] tracking-wider uppercase font-semibold transition-all rounded-sm cursor-pointer flex items-center gap-1 hover:text-white"
-                        >
-                          <Zap className="w-3 h-3 text-[#6366f1]" /> RUN
-                        </button>
-                      </div>
-
-                      {testResult ? (
-                        <div className="border border-[#1a1a1a] rounded-sm overflow-hidden bg-[#000] font-mono text-[10px] shadow-inner">
-                          <div className="px-3 py-1.5 bg-[#0a0a0a] border-b border-[#1a1a1a] flex justify-between items-center">
-                            <span className="text-[#4b5563]">SIMULATOR CONSOLE FEED</span>
-                            <span className={`px-1.5 py-0.5 rounded-sm text-[9px] border font-bold ${
-                              testResult.status === "ACCESS_DENIED" 
-                                ? "bg-red-950/40 text-red-500 border-red-900/40" 
-                                : "bg-emerald-950/40 text-[#10b981] border-emerald-940"
-                            }`}>{testResult.status}</span>
-                          </div>
-                          
-                          <div className="p-3 text-[11px] space-y-2">
-                            <div className="flex justify-between pb-1.5 border-b border-[#0a0a0a]">
-                              <span className="text-[#4b5563]">MODEL LATENCY METRIC:</span>
-                              <span className="font-bold text-[#f59e0b]">{testResult.latency_ms} ms</span>
-                            </div>
-                            <div>
-                              <span className="text-[#4b5563] block">MESSAGE:</span>
-                              <p className="text-white mt-1 pr-2 italic leading-relaxed pl-2 border-l border-[#1e1b4b]">
-                                {testResult.message}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="p-3 bg-black/40 border border-dashed border-[#1a1a1a] rounded-sm text-center text-[10px] text-[#4b5563] font-mono">
-                          Awaiting simulator pipeline entry. Press RUN to analyze metrics.
-                        </div>
-                      )}
-                    </div>
+                {/* Sub-card details */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-mono text-[11px] text-neutral-500 select-none">
+                  <div className="p-3.5 bg-black/10 border border-[#1a1936] rounded-xl flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-indigo-500" />
+                    <span>Focus Subject: **{selectedSubject}**</span>
                   </div>
-
-                  {/* Operational Telemetry Analytics (md:col-span-5) */}
-                  <div className="bg-[#080808] border border-[#1a1a1a] p-6 rounded-sm md:col-span-5 flex flex-col justify-between min-h-[180px]">
-                    <div>
-                      <h4 className="text-xs font-semibold uppercase tracking-widest text-[#9ca3af]">Operational Telemetry</h4>
-                      <p className="text-[10px] text-[#4b5563] font-mono tracking-widest uppercase mt-0.5">Static Optimization State</p>
-                    </div>
-
-                    <div className="flex-1 flex flex-col justify-center items-center py-4">
-                      <div className="text-5xl font-mono text-[#6366f1] font-light tracking-tight">
-                        {isLoading ? "--" : "98.4%"}
-                      </div>
-                      <span className="text-[10px] uppercase tracking-[0.2em] text-[#4b5563] mt-2 font-mono">Consolidation Progress</span>
-                      
-                      <div className="w-full max-w-[200px] h-1.5 bg-[#000] border border-[#1a1a1a] mt-4 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-[#6366f1] transition-all duration-1000" 
-                          style={{ width: isLoading ? "15%" : "98.4%" }}
-                        ></div>
-                      </div>
-                    </div>
+                  <div className="p-3.5 bg-black/10 border border-[#1a1936] rounded-xl flex items-center gap-2">
+                    <Volume2 className="w-4 h-4 text-indigo-500" />
+                    <span>Vocoder Audio Output: **{selectedVoice}**</span>
                   </div>
-
+                  <div className="p-3.5 bg-black/10 border border-[#1a1936] rounded-xl flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-indigo-500" />
+                    <span>Latency multiplier: **1.2ms/char**</span>
+                  </div>
                 </div>
-
               </motion.div>
             )}
 
-          </section>
-
-        </div>
-
-        {/* Mutation Event Log Component */}
-        <div id="mutation-event-log-container" className="mt-8 border border-[#1a1a1a] bg-[#080808] p-6 rounded-sm shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-[#141414] pb-4 gap-3">
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-[#9ca3af] flex items-center gap-2">
-                <History className="w-4 h-4 text-[#6366f1]" />
-                MUTATION AUDIT LEDGER
-              </h3>
-              <p className="text-[10px] text-[#4b5563] font-mono uppercase mt-1">RECORDS SYSTEM 2 SLEEP TRIGGER AND DYNAMIC CONSLIDATION LOGS</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="px-2.5 py-1 bg-[#1e1b4b] text-[#818cf8] text-[10px] rounded-sm font-mono border border-[#312e81]">
-                {mutationLogs.length} EVENTS RECORDED
-              </span>
-              <button
-                onClick={() => setMutationLogs([])}
-                className="text-[10px] bg-[#111] hover:bg-[#1a1a1a] border border-[#1a1a1a] text-[#4b5563] hover:text-[#9ca3af] font-mono uppercase tracking-wider px-2.5 py-1 rounded-sm transition-colors cursor-pointer"
+            {/* TAB 2: STUDY FOCUS ZONE (POMODORO TIMER) */}
+            {activeTab === "focus" && (
+              <motion.div
+                key="focus"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="max-w-xl mx-auto flex flex-col items-center gap-8 py-4"
               >
-                Clear History
-              </button>
-            </div>
-          </div>
+                {/* Mode Selector pills */}
+                <div className="bg-[#0c0b1a] p-1.5 rounded-full border border-[#1a1936] flex gap-1 select-none">
+                  <button
+                    onClick={() => handleModeChange("study")}
+                    className={`px-6 py-2 rounded-full text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer ${
+                      timerMode === "study"
+                        ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
+                        : "text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    Study Session
+                  </button>
+                  <button
+                    onClick={() => handleModeChange("short")}
+                    className={`px-6 py-2 rounded-full text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer ${
+                      timerMode === "short"
+                        ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
+                        : "text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    Short Break
+                  </button>
+                  <button
+                    onClick={() => handleModeChange("long")}
+                    className={`px-6 py-2 rounded-full text-xs font-semibold uppercase tracking-wider transition-all cursor-pointer ${
+                      timerMode === "long"
+                        ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20"
+                        : "text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    Long Break
+                  </button>
+                </div>
 
-          <div className="max-h-72 overflow-y-auto pr-1 space-y-2 select-text custom-scrollbar">
-            {mutationLogs.length === 0 ? (
-              <div className="text-center py-8 text-xs font-mono text-[#4b5563]">
-                // Audit trail is empty. No mutation events have run.
-              </div>
-            ) : (
-              mutationLogs.map((log) => (
-                <div 
-                  key={log.id} 
-                  className={`p-3 bg-[#0a0a0a] border rounded-sm transition-all flex flex-col md:flex-row justify-between md:items-center gap-3 ${
-                    log.status === "SUCCESS" ? "border-[#1a1a1a] hover:border-[#6366f1]/20" : "border-red-950/40 hover:border-red-900/40"
-                  }`}
-                >
-                  <div className="flex flex-col md:flex-row md:items-center gap-4">
-                    <div className="flex items-center gap-2 min-w-[100px]">
-                      <span className="text-[10px] font-mono text-[#4b5563] whitespace-nowrap bg-black px-2 py-0.5 rounded border border-[#111]">
-                        {log.timestamp}
-                      </span>
-                      <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded-sm border font-mono ${
-                        log.status === "SUCCESS"
-                          ? "bg-emerald-950/50 text-emerald-400 border-emerald-900/40"
-                          : "bg-red-950/50 text-red-400 border-red-900/40"
-                      }`}>
-                        {log.status}
-                      </span>
-                    </div>
+                {/* Circular countdown dial */}
+                <div className="relative w-80 h-80 flex items-center justify-center">
+                  {/* Background track circle */}
+                  <svg className="absolute w-full h-full -rotate-90" viewBox="0 0 200 200">
+                    <circle
+                      cx="100"
+                      cy="100"
+                      r="85"
+                      fill="transparent"
+                      stroke="#141328"
+                      strokeWidth="6"
+                    />
+                    {/* Glowing progress circle */}
+                    <circle
+                      cx="100"
+                      cy="100"
+                      r="85"
+                      fill="transparent"
+                      stroke="url(#timerGradient)"
+                      strokeWidth="6"
+                      strokeDasharray="534"
+                      strokeDashoffset={534 - (534 * percentageTimeLeft) / 100}
+                      strokeLinecap="round"
+                      className="transition-all duration-300"
+                    />
+                    <defs>
+                      <linearGradient id="timerGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#6366f1" />
+                        <stop offset="100%" stopColor="#8b5cf6" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
 
-                    <div className="space-y-1">
-                      <div className="text-xs font-mono text-[#e5e7eb] flex flex-wrap items-center gap-1.5">
-                        <span className="text-[#6366f1] font-semibold">{log.identity}</span>
-                        <span className="text-[#4b5563]">&bull;</span>
-                        <span className="text-[#cbd5e1] font-light italic">&quot;{log.promptExcerpt}&quot;</span>
-                      </div>
-                      
-                      {log.status === "SUCCESS" && (
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-mono text-[#4b5563]">
-                          <span>Consolidated: <strong className="text-white">{log.factsCount} facts</strong></span>
-                          <span>•</span>
-                          <span className="flex items-center gap-1 flex-wrap">
-                            Skills compiled: 
-                            {log.skillsTaught.length > 0 ? (
-                              log.skillsTaught.map((sk, sidx) => (
-                                <span key={sidx} className="bg-[#1e1b4b] text-[#818cf8] px-1 rounded text-[9px] font-semibold border border-[#312e81]/30">
-                                  {sk}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-[#4b5563]">none</span>
-                            )}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="text-[10px] font-mono text-neutral-600 block text-right">
-                    ID: {log.id}
+                  {/* Inner Timer text */}
+                  <div className="text-center z-10 select-none">
+                    <span className="text-6xl font-extralight tracking-tight text-white font-mono block">
+                      {Math.floor(timeLeft / 60).toString().padStart(2, "0")}
+                      <span className="animate-pulse">:</span>
+                      {(timeLeft % 60).toString().padStart(2, "0")}
+                    </span>
+                    <span className="text-[10px] tracking-[0.25em] text-[#6d6a91] font-bold uppercase mt-2 block">
+                      {timerMode === "study" && "Time to Focus"}
+                      {timerMode === "short" && "Take a Rest"}
+                      {timerMode === "long" && "Reset Subconscious"}
+                    </span>
                   </div>
                 </div>
-              ))
+
+                {/* Controls toolbar */}
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={handleResetTimer}
+                    className="w-12 h-12 rounded-full bg-[#0d0c1b] border border-[#1a1936] hover:border-indigo-500/40 text-neutral-400 hover:text-white flex items-center justify-center transition-all cursor-pointer active:scale-95"
+                    title="Reset countdown"
+                  >
+                    <RotateCcw className="w-5 h-5" />
+                  </button>
+
+                  <button
+                    onClick={() => setTimerIsRunning(!timerIsRunning)}
+                    className="px-8 py-3.5 rounded-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold text-sm tracking-wider uppercase flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-500/25 active:scale-95 transition-all"
+                  >
+                    {timerIsRunning ? (
+                      <>
+                        <Pause className="w-4 h-4 fill-current" /> Pause
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 fill-current" /> Start Focus
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={toggleAmbientSound}
+                    className={`w-12 h-12 rounded-full border flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
+                      ambientSounds
+                        ? "bg-indigo-600/20 border-indigo-500/40 text-indigo-400 shadow-md"
+                        : "bg-[#0d0c1b] border-[#1a1936] text-neutral-400 hover:text-white hover:border-indigo-500/40"
+                    }`}
+                    title={ambientSounds ? "Mute Study Beats" : "Play Study Noise"}
+                  >
+                    {ambientSounds ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                  </button>
+                </div>
+
+                {/* Ambient sound feedback banner */}
+                {ambientSounds && (
+                  <div className="py-2.5 px-5 bg-indigo-950/20 border border-indigo-500/20 rounded-full text-xs font-mono text-indigo-400 flex items-center gap-2 select-none animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping"></span>
+                    <span>Synthesizing Brownian Focus Waves...</span>
+                  </div>
+                )}
+              </motion.div>
             )}
-          </div>
+
+            {/* TAB 3: SMART FLASHCARDS DECK */}
+            {activeTab === "flashcards" && (
+              <motion.div
+                key="flashcards"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="max-w-3xl mx-auto flex flex-col gap-8"
+              >
+                {/* Generate form */}
+                <div className="p-6 bg-black/20 border border-[#1a1936] rounded-xl flex flex-col sm:flex-row gap-4 items-end backdrop-blur-sm shadow-xl">
+                  <div className="flex-1 space-y-2">
+                    <label className="text-xs uppercase tracking-wider font-mono text-[#74719e]">Generate study cards for topic:</label>
+                    <input
+                      type="text"
+                      value={cardTopic}
+                      onChange={(e) => setCardTopic(e.target.value)}
+                      placeholder="e.g. Newton's laws of motion, Photosynthesis, React hooks..."
+                      className="w-full bg-[#090812] border border-[#1a1936] hover:border-[#2b295c] focus:border-indigo-500 rounded-xl py-3 px-4 text-sm text-white placeholder-[#4f4d6d] focus:outline-none transition-colors"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleGenerateCards}
+                    disabled={!cardTopic.trim() || cardsLoading}
+                    className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-xl flex items-center gap-2 cursor-pointer transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-indigo-500/20"
+                  >
+                    {cardsLoading ? (
+                      <>
+                        <RotateCcw className="w-4 h-4 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        Build Study Deck
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Flashcard presentation space */}
+                {flashcards.length > 0 && (
+                  <div className="flex flex-col items-center gap-6">
+                    
+                    {/* Flippable visual card */}
+                    <div 
+                      onClick={() => setFlippedCardIndex(flippedCardIndex === currentCardIndex ? null : currentCardIndex)}
+                      className="w-full max-w-lg h-72 cursor-pointer group relative [perspective:1000px] select-none"
+                    >
+                      <div 
+                        className={`w-full h-full rounded-2xl border transition-all duration-500 [transform-style:preserve-3d] shadow-2xl relative ${
+                          flippedCardIndex === currentCardIndex 
+                            ? "[transform:rotateY(180deg)] border-indigo-500/30 bg-gradient-to-br from-[#0c0b1f] to-[#161233]" 
+                            : "border-[#1a1936] bg-[#0c0a1a]"
+                        }`}
+                      >
+                        {/* CARD FRONT: The Question */}
+                        <div className="absolute inset-0 w-full h-full p-8 flex flex-col justify-between [backface-visibility:hidden] rounded-2xl">
+                          <div className="flex justify-between items-center text-[10px] font-mono text-[#5b5883] uppercase tracking-wider">
+                            <span>Study Card {currentCardIndex + 1} of {flashcards.length}</span>
+                            <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">QUESTION</span>
+                          </div>
+                          
+                          <div className="flex-1 flex items-center justify-center">
+                            <p className="text-xl font-medium text-white text-center leading-relaxed select-text">
+                              {flashcards[currentCardIndex].question}
+                            </p>
+                          </div>
+
+                          <span className="text-[10px] font-mono text-center text-neutral-500 block uppercase tracking-widest">
+                            Click to flip and reveal answer
+                          </span>
+                        </div>
+
+                        {/* CARD BACK: The Answer */}
+                        <div className="absolute inset-0 w-full h-full p-8 flex flex-col justify-between [transform:rotateY(180deg)] [backface-visibility:hidden] rounded-2xl">
+                          <div className="flex justify-between items-center text-[10px] font-mono text-indigo-400 uppercase tracking-wider">
+                            <span>Study Card {currentCardIndex + 1} of {flashcards.length}</span>
+                            <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">ANSWER EXPLANATION</span>
+                          </div>
+                          
+                          <div className="flex-1 flex items-center justify-center">
+                            <p className="text-base text-neutral-200 text-center leading-relaxed select-text">
+                              {flashcards[currentCardIndex].answer}
+                            </p>
+                          </div>
+
+                          <span className="text-[10px] font-mono text-center text-indigo-400/70 block uppercase tracking-widest">
+                            Click to flip back to question
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Pagination indicators */}
+                    <div className="flex items-center gap-4">
+                      <button
+                        onClick={() => {
+                          setFlippedCardIndex(null);
+                          setCurrentCardIndex(prev => Math.max(0, prev - 1));
+                        }}
+                        disabled={currentCardIndex === 0}
+                        className="px-4 py-2 text-xs font-mono border border-[#1a1936] hover:border-indigo-500/40 text-neutral-400 hover:text-white rounded-lg disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                      >
+                        Prev Card
+                      </button>
+
+                      <span className="text-xs font-mono text-[#5b5883]">
+                        {currentCardIndex + 1} / {flashcards.length}
+                      </span>
+
+                      <button
+                        onClick={() => {
+                          setFlippedCardIndex(null);
+                          setCurrentCardIndex(prev => Math.min(flashcards.length - 1, prev + 1));
+                        }}
+                        disabled={currentCardIndex === flashcards.length - 1}
+                        className="px-4 py-2 text-xs font-mono border border-[#1a1936] hover:border-indigo-500/40 text-neutral-400 hover:text-white rounded-lg disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                      >
+                        Next Card
+                      </button>
+                    </div>
+
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {/* TAB 4: PREMIUM ACCESS TIERS */}
+            {activeTab === "pricing" && (
+              <motion.div
+                key="pricing"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="max-w-4xl mx-auto flex flex-col gap-6"
+              >
+                <div className="text-center space-y-2 mb-4">
+                  <span className="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold font-mono tracking-widest rounded-full uppercase">
+                    Unleash Peak Academic Performance
+                  </span>
+                  <h2 className="text-3xl font-bold tracking-tight text-white mt-2">Priced to Convert. Built to Deliver.</h2>
+                  <p className="text-sm text-neutral-400 max-w-lg mx-auto">
+                    Upgrade to get unlimited voice chat parameters, advanced homework step-solvers, and high-performance reasoning.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch max-w-3xl mx-auto w-full">
+                  
+                  {/* FREE PLAN */}
+                  <div className="bg-[#0b0a1a] border border-[#1a1936] rounded-2xl p-6 flex flex-col justify-between select-none">
+                    <div className="space-y-4">
+                      <div>
+                        <h3 className="text-base font-semibold text-neutral-300">Basic Scholar</h3>
+                        <p className="text-xs text-neutral-500 mt-1">Fundamental tools for studying.</p>
+                      </div>
+
+                      <div className="py-4 border-y border-[#1a1936] flex items-baseline gap-1">
+                        <span className="text-4xl font-extrabold text-white">$0</span>
+                        <span className="text-xs text-neutral-500 font-mono">/ Forever Free</span>
+                      </div>
+
+                      <ul className="space-y-3 text-xs text-neutral-300">
+                        {["20 free text queries daily", "Standard speed models", "Basic Study Pomodoro Timer", "Generate standard flashcards"].map((perk, i) => (
+                          <li key={i} className="flex items-center gap-2">
+                            <Check className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                            <span>{perk}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <button
+                      disabled={true}
+                      className="w-full mt-8 py-3 rounded-xl border border-dashed border-[#1a1936] text-neutral-500 text-xs font-semibold uppercase tracking-wider cursor-not-allowed"
+                    >
+                      Active Plan
+                    </button>
+                  </div>
+
+                  {/* PRO SCHOLAR PLAN */}
+                  <div className="bg-gradient-to-br from-[#0e0c24] to-[#120e2e] border-2 border-indigo-600 rounded-2xl p-6 flex flex-col justify-between shadow-2xl relative select-none">
+                    <div className="absolute top-0 right-6 -translate-y-1/2 bg-indigo-600 text-white font-mono text-[9px] uppercase tracking-widest font-bold px-3 py-1 rounded-full border border-indigo-500 shadow-md animate-pulse">
+                      RECOMMENDED
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <h3 className="text-base font-semibold text-white flex items-center gap-1.5">
+                          Aura Premium Scholar
+                          <Star className="w-4 h-4 text-amber-400 fill-current" />
+                        </h3>
+                        <p className="text-xs text-indigo-400 mt-1">Unleash the ultimate academic companion.</p>
+                      </div>
+
+                      <div className="py-4 border-y border-[#1d1a45] flex items-baseline gap-1">
+                        <span className="text-4xl font-extrabold text-white">$9.99</span>
+                        <span className="text-xs text-neutral-400 font-mono">/ Monthly Membership</span>
+                      </div>
+
+                      <ul className="space-y-3 text-xs text-neutral-300">
+                        {[
+                          "Unlimited Vocal & Text chat queries",
+                          "High-Performance Ultra-Reasoning models",
+                          "Real-time step-by-step problem solvers",
+                          "Premium prebuilt vocal TTS voices",
+                          "No rate limits on flashcard building"
+                        ].map((perk, i) => (
+                          <li key={i} className="flex items-center gap-2">
+                            <Check className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                            <span>{perk}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {isPremium ? (
+                      <div className="w-full mt-8 py-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center text-xs font-bold text-emerald-400 uppercase tracking-widest">
+                        ✓ PRO SUBSCRIPTION ACTIVE
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setShowCheckoutModal(true)}
+                        className="w-full mt-8 py-3.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold uppercase tracking-wider cursor-pointer shadow-lg shadow-indigo-500/20 transition-all hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-1.5"
+                      >
+                        <span>Upgrade to Aura Pro</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                </div>
+              </motion.div>
+            )}
+
+          </AnimatePresence>
+
         </div>
       </main>
 
-      {/* Cybernetic Footer */}
-      <footer className="h-14 bg-[#0a0a0a] border-t border-[#1a1a1a] flex flex-col sm:flex-row items-center justify-between px-6 sm:px-8 py-3 text-[10px] font-mono text-[#4b5563] uppercase tracking-widest gap-2 bg-[#080808]">
-        <div className="flex space-x-6 text-center sm:text-left">
-          <span>Build: 2.1.0-Consolidation</span>
-          <span className="hidden xs:inline-block">•</span>
-          <span>Runtime: Python 3.10.x</span>
-        </div>
-        <div className="flex items-center space-x-1.1">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#6366f1] animate-ping mr-2"></span>
-          <span className="text-[#6366f1] uppercase font-semibold">Ready for brain_a.py injection...</span>
-        </div>
-      </footer>
+      {/* SECURE CHECKOUT MODAL */}
+      <AnimatePresence>
+        {showCheckoutModal && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#0b0a1a] border border-[#1a1936] w-full max-w-md rounded-2xl overflow-hidden shadow-2xl relative"
+            >
+              {/* Checkout header */}
+              <div className="p-6 border-b border-[#1a1936] bg-[#0c0b20] flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-600/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                  <CreditCard className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Aura Pro Checkout</h3>
+                  <p className="text-[10px] text-neutral-500">Secure payment sandbox mode</p>
+                </div>
+
+                <button
+                  onClick={() => setShowCheckoutModal(false)}
+                  className="ml-auto w-8 h-8 rounded-full bg-black/40 hover:bg-white/5 border border-[#1a1936] text-neutral-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer text-sm font-semibold"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Checkout Form */}
+              <form onSubmit={handleCheckoutSubmit} className="p-6 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-mono uppercase text-neutral-500">Subscription Total</label>
+                  <p className="text-2xl font-extrabold text-white">$9.99<span className="text-xs text-neutral-400 font-normal"> / month</span></p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-mono uppercase text-neutral-400 block">Name on Card</label>
+                  <input
+                    type="text"
+                    required
+                    value={cardName}
+                    onChange={(e) => setCardName(e.target.value)}
+                    placeholder="e.g. John Doe"
+                    className="w-full bg-[#030308] border border-[#1a1936] focus:border-indigo-500 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none transition-colors"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-mono uppercase text-neutral-400 block">Card Number</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      value={cardNumber}
+                      onChange={(e) => setCardNumber(e.target.value)}
+                      placeholder="4111 2222 3333 4444"
+                      maxLength={19}
+                      className="w-full bg-[#030308] border border-[#1a1936] focus:border-indigo-500 rounded-xl py-2.5 pl-10 pr-3 text-xs text-white focus:outline-none transition-colors font-mono"
+                    />
+                    <CreditCard className="w-4 h-4 text-[#4f4d6d] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-mono uppercase text-neutral-400 block">Expiry (MM/YY)</label>
+                    <input
+                      type="text"
+                      required
+                      value={cardExpiry}
+                      onChange={(e) => setCardExpiry(e.target.value)}
+                      placeholder="12/28"
+                      maxLength={5}
+                      className="w-full bg-[#030308] border border-[#1a1936] focus:border-indigo-500 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none transition-colors font-mono"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-mono uppercase text-neutral-400 block">CVC / CVV</label>
+                    <input
+                      type="text"
+                      required
+                      value={cardCvc}
+                      onChange={(e) => setCardCvc(e.target.value)}
+                      placeholder="123"
+                      maxLength={3}
+                      className="w-full bg-[#030308] border border-[#1a1936] focus:border-indigo-500 rounded-xl py-2.5 px-3 text-xs text-white focus:outline-none transition-colors font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-3 bg-indigo-950/20 border border-indigo-900/30 rounded-xl flex gap-2.5 items-start">
+                  <AlertCircle className="w-4 h-4 text-indigo-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-[10px] text-indigo-300 leading-relaxed">
+                    This is in sandbox demo mode. Any dummy credit card input will authorize successfully without actual charges.
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={checkoutIsProcessing}
+                  className="w-full py-3.5 mt-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-indigo-500/20"
+                >
+                  {checkoutIsProcessing ? (
+                    <>
+                      <RotateCcw className="w-4 h-4 animate-spin" />
+                      Authorizing...
+                    </>
+                  ) : (
+                    <>
+                      <span>Pay & Unlock Premium</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
-

@@ -4,12 +4,14 @@ import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 
+dotenv.config({ path: ".env.local" });
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Initialize Gemini client server-side
 const ai = new GoogleGenAI({
@@ -148,7 +150,7 @@ app.post("/api/transcribe", async (req, res) => {
 
     console.log(`[Cognitive Audio Core] Transcribing payload with mime: ${mimeType || "audio/webm"}`);
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-2.5-flash",
       contents: [
         {
           inlineData: {
@@ -206,17 +208,17 @@ app.post("/api/speak", async (req, res) => {
 // 3. Conversational multi-model coordinator (runs chat with text, returns both response text and speech base64)
 app.post("/api/chat-voice", async (req, res) => {
   try {
-    const { userInput, modelName, voiceName, synapticConfig } = req.body;
+    const { userInput, modelName, voiceName, subject } = req.body;
     const model = modelName || "gemini-3.5-flash";
     const selectedVoice = voiceName || "Zephyr";
 
-    console.log(`[Cognitive Audio Core] Processing voice-chat. Prompt: "${userInput}", Model: ${model}, Voice: ${selectedVoice}`);
+    console.log(`[Cognitive Tutor Core] Processing voice-chat. Prompt: "${userInput}", Model: ${model}, Voice: ${selectedVoice}, Subject: ${subject || "General"}`);
 
-    // System instruction for futuristic, succinct voice-first conversational prompt
-    let systemInstruction = "You are the vocal synthesized persona of REM-AI Core System 2. Formulate exceptionally clean, brief, and smart responses (max 2 sentences) optimized for direct text-to-speech reading. Maintain a sleek, supportive, cybernetic tone.";
+    // System instruction for Aura - the Student Academic Companion
+    let systemInstruction = "You are Aura, an elite, highly supportive academic companion and AI tutor. Your role is to help students learn, understand complex topics, and stay motivated. Formulate exceptionally clean, brief, and engaging responses (max 3 sentences) optimized for direct text-to-speech reading. Adapt your tone to be encouraging and intelligent, using student-friendly language. If relevant, mention that premium users get step-by-step solvers.";
     
-    if (synapticConfig) {
-      systemInstruction += `\nIntegrate parameters from synaptic synapses context: ${JSON.stringify(synapticConfig)}`;
+    if (subject) {
+      systemInstruction += `\nThe student is currently studying ${subject}. Adjust your explanations and vocabulary to match this field of study.`;
     }
 
     // Call chosen model to get text
@@ -232,33 +234,93 @@ app.post("/api/chat-voice", async (req, res) => {
     const responseText = (textResponse.text || "Cognitive channels currently silent.").trim();
 
     // Call TTS model to turn response text into spoken audio
-    console.log(`[Cognitive Audio Core] Converting result to speech voice: ${responseText}`);
-    const ttsResponse = await ai.models.generateContent({
-      model: "gemini-3.1-flash-tts-preview",
-      contents: [{ parts: [{ text: responseText }] }],
-      config: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: selectedVoice }
+    console.log(`[Cognitive Tutor Core] Converting result to speech voice: ${responseText}`);
+    try {
+      const ttsResponse = await ai.models.generateContent({
+        model: "gemini-3.1-flash-tts-preview",
+        contents: [{ parts: [{ text: responseText }] }],
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: selectedVoice }
+            }
           }
+        }
+      });
+
+      const inlineData = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+      const base64Audio = inlineData?.data || null;
+      const mimeType = inlineData?.mimeType || "audio/mp3";
+
+      console.log(`[Cognitive Tutor Core] Generated audio with MIME type: ${mimeType}`);
+
+      res.json({
+        text: responseText,
+        audio: base64Audio,
+        mimeType: mimeType,
+        modelUsed: model,
+        voiceUsed: selectedVoice
+      });
+    } catch (ttsError: any) {
+      console.warn(`[Cognitive Tutor Core] TTS generation failed (probably rate limit 429). Falling back to client-side SpeechSynthesis. Error: ${ttsError.message || ttsError}`);
+      res.json({
+        text: responseText,
+        audio: null,
+        mimeType: null,
+        error: "TTS_RATE_LIMITED",
+        modelUsed: model,
+        voiceUsed: selectedVoice
+      });
+    }
+  } catch (error: any) {
+    console.error("[Cognitive Tutor Core] Voice query dispatch error:", error);
+    res.status(500).json({ error: error.message || "Multimodal chat processing exception." });
+  }
+});
+
+// 4. Generate structured Q&A flashcards for a specific academic topic
+app.post("/api/generate-flashcards", async (req, res) => {
+  try {
+    const { topic, subject } = req.body;
+    if (!topic) {
+      return res.status(400).json({ error: "Missing topic for flashcards" });
+    }
+    console.log(`[Cognitive Tutor Core] Generating flashcards for topic: "${topic}" under subject: "${subject || "General"}"`);
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `Generate exactly 5 comprehensive, highly useful study flashcards (question and answer pairs) to help a student study the topic: "${topic}" in the subject: "${subject || "General"}".`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            flashcards: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  question: { type: Type.STRING, description: "A clear, focused question or term to be defined." },
+                  answer: { type: Type.STRING, description: "A concise, accurate, and easy-to-understand explanation or answer." }
+                },
+                required: ["question", "answer"]
+              }
+            }
+          },
+          required: ["flashcards"]
         }
       }
     });
 
-    const base64Audio = ttsResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
-
-    res.json({
-      text: responseText,
-      audio: base64Audio,
-      modelUsed: model,
-      voiceUsed: selectedVoice
-    });
+    const parsedResult = JSON.parse(response.text || "{}");
+    res.json(parsedResult);
   } catch (error: any) {
-    console.error("[Cognitive Audio Core] Voice query dispatch error:", error);
-    res.status(500).json({ error: error.message || "Multimodal chat processing exception." });
+    console.error("[Cognitive Tutor Core] Flashcard generation error:", error);
+    res.status(500).json({ error: error.message || "Failed to generate flashcards." });
   }
 });
+
 
 // Serve frontend SPA
 async function startServer() {
